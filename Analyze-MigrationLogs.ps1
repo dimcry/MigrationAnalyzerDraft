@@ -352,6 +352,8 @@ function Create-LogFile {
         Write-Host "You do not have permissions to create files under: " -ForegroundColor Red -NoNewline
         Write-Host "$WorkingDirectory" -ForegroundColor White
         Write-Host "The script will exit now..." -ForegroundColor Red
+
+        Restore-OriginalState
         Exit
     }
 
@@ -901,7 +903,7 @@ Function ConnectTo-ExchangeOnline {
 		if ($ErrorCount -gt 3){
 		
 			Write-log "[ERROR] || Failed to setup session after multiple tries"
-			Write-log "[ERROR] || Aborting Script"
+            Write-log "[ERROR] || Aborting Script"
 			exit
 		
 		}
