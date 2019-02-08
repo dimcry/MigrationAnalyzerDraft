@@ -168,28 +168,20 @@ function Create-WorkingDirectory {
     Write-Host " format, under " -ForegroundColor Cyan -NoNewline
     Write-Host "`"%temp%\MigrationAnalyzer\`"" -ForegroundColor White
 
-    ### <summary>
     ### TheDateToUse variable is used to collect the current date&time in the "MMddyyyy_HHmmss" format.
-    ### </summary>
     $TheDateToUse = (Get-Date).ToString("MMddyyyy_HHmmss")
 
-    ### <summary>
     ### WorkingDirectory variable is initialized to "%temp%\MigrationAnalyzer\<MMddyyyy_HHmmss>".
-    ### </summary>
     $WorkingDirectory = "$env:temp\MigrationAnalyzer\$TheDateToUse"
 
-    ### <summary>
     ### Creating the Working directory in the desired format.
-    ### </summary>
     if (-not (Test-Path $WorkingDirectory)) {
         try {
             $void = New-Item -ItemType Directory -Force -Path $WorkingDirectory -ErrorAction Stop            
             $WorkingDirectoryToUse = $WorkingDirectory
         }
         catch {
-            ### <summary>
             ### In case of error, we will retry to create the Working directory, for maximum 5 times.
-            ### </summary>
             if ($NumberOfChecks -le 5) {
                 if (Test-Path $WorkingDirectory){
                     $WorkingDirectoryToUse = $WorkingDirectory
@@ -199,20 +191,16 @@ function Create-WorkingDirectory {
                     $WorkingDirectoryToUse = Create-WorkingDirectory -NumberOfChecks $NumberOfChecks    
                 }
             }
-            ### <summary>
             ### In case we will not be able to create the Working directory even after 5 times, we will set the value of WorkingDirectoryToUse
             ### variable to NotAbleToCreateTheWorkingDirectory.
-            ### </summary>            
             else {
                 $WorkingDirectoryToUse = "NotAbleToCreateTheWorkingDirectory"
             }
         }
     }
 
-    ### <summary>
     ### Checking if we were able to create the Working Directory in the desired location. If not, we will ask to insert the path where it can be created,
     ### from the keyboard.
-    ### </summary>      
     if ($WorkingDirectoryToUse -eq "NotAbleToCreateTheWorkingDirectory") {
         Write-Host
         Write-Host "We were unable to create the working directory with " -ForegroundColor Red -NoNewline
@@ -225,25 +213,19 @@ function Create-WorkingDirectory {
         Write-Host "`tPath: " -ForegroundColor Cyan -NoNewline
         $WorkingDirectoryToUse = Read-Host
     
-        ### <summary>
         ### If entered value will be empty, the script will exit.
-        ### </summary>  
         if (-not ($WorkingDirectoryToUse)) {
             Write-Host
             Write-Host "No valid path was provided. The script will exit now." -ForegroundColor Red
             Exit
         }
         else {
-            ### <summary>
             ### Doing 1-time effort to create the Working Directory in the location inserted from keyboard
-            ### </summary>  
             try {
                 $void = New-Item -ItemType Directory -Force -Path $WorkingDirectoryToUse -ErrorAction Stop            
             }
             catch {
-                ### <summary>
                 ### In case of error, we will exit the script.
-                ### </summary>
                 Write-Host
                 Write-Host "We were unable to create the Working Directory under: " -ForegroundColor Red -NoNewline
                 Write-Host "$WorkingDirectoryToUse" -ForegroundColor White
@@ -252,9 +234,7 @@ function Create-WorkingDirectory {
             }
         }
     }
-    ### <summary>
     ### We successfully created a Working Directory. We will set it as current path (Set-Location -Path $WorkingDirectoryToUse)
-    ### </summary>  
     else {
         Write-Host
         Write-Host "We successfully created the following working directory:" -ForegroundColor Green
@@ -269,10 +249,8 @@ function Create-WorkingDirectory {
         Set-Location -Path $WorkingDirectoryToUse
     }
 
-    ### <summary>
     ### Create-WorkingDirectory function will return the Path of the Working directory, or NotAbleToCreateTheWorkingDirectory in case
     ### we were unable to create the Working directory.
-    ### </summary>  
     return $WorkingDirectoryToUse
 }
 
@@ -302,20 +280,14 @@ Function Write-Log {
         $NonInteractive
     )
 	
-	### <summary>
-    ### Collecting the current date
-    ### </summary>
-	[string]$date = Get-Date -Format G
+	### Collecting the current date
+    [string]$date = Get-Date -Format G
 		
-	### <summary>
-    ### Write everything to LogFile
-    ### </summary>
-	( "[" + $date + "] || " + $string) | Out-File -FilePath $script:LogFile -Append
+	### Write everything to LogFile
+    ( "[" + $date + "] || " + $string) | Out-File -FilePath $script:LogFile -Append
 	
-	### <summary>
-    ### In case NonInteractive is not True, write on display, too
-    ### </summary>
-	if (!($NonInteractive)){
+	### In case NonInteractive is not True, write on display, too
+    if (!($NonInteractive)){
 		( "[" + $date + "] || " + $string) | Write-Host
 	}
 }
@@ -333,33 +305,26 @@ function Create-LogFile {
         $WorkingDirectory
     )
 
-    ### <summary>
     ### LogFile variable (Scope: Script) is initialized to "$WorkingDirectory\MigrationAnalyzer.log".
-    ### </summary>
     $script:LogFile = "$WorkingDirectory\MigrationAnalyzer.log"
 
     try {
-        ### <summary>
         ### Creating the LogFile.
-        ### </summary>
         $void = New-Item -ItemType "file" -Path "$script:LogFile" -Force -ErrorAction Stop
     }
     catch {
-        ### <summary>
         ### In case of error, the script will exit.
-        ### </summary>
         Write-Host
         Write-Host "You do not have permissions to create files under: " -ForegroundColor Red -NoNewline
         Write-Host "$WorkingDirectory" -ForegroundColor White
         Write-Host "The script will exit now..." -ForegroundColor Red
 
         Restore-OriginalState
+        
         Exit
     }
 
-    ### <summary>
     ### In case of success, we will log the first entry in the LogFile.
-    ### </summary>    
     Write-Log "[INFO] || Logfile successfully created. Its location is $script:LogFile"
 }
 
@@ -368,23 +333,17 @@ function Create-LogFile {
 ### </summary>
 function Check-Parameters {
 
-    ### <summary>
     ### If FilePath parameter of the script was used, we will continue on this path.
-    ### </summary>
     if ($FilePath){
         Write-Log ("[INFO] || The script was started with the FilePath parameter: `"-FilePath $FilePath`"")
         Selected-FileOption -FilePath $FilePath
     }
-    ### <summary>
     ### If ConnectToExchangeOnline parameter of the script was used, we will continue on this path.
-    ### </summary>
     elseif (ConnectToExchangeOnline) {
         Selected-ConnectToExchangeOnlineOption -FilePath $FilePath
         New-CleanO365Session 
     }
-    ### <summary>
     ### If ConnectToExchangeOnPremises parameter of the script was used, we will continue on this path.
-    ### </summary>
     elseif (ConnectToExchangeOnPremises) {
         
     }
@@ -403,66 +362,47 @@ function Selected-FileOption {
     )
 
     [int]$TheNumberOfChecks = 1
-    ### <summary>
     ### If FilePath was provided, the script will use it in order to validate if the information from this variable is a correct
     ### full path of an .xml file.
-    ### </summary>
     if ($FilePath){
         try {
-            ### <summary>
             ### The script validates that the path provided is of a valid .xml file.
-            ### </summary>
             Write-Log "[INFO] || We are validating if `"$FilePath`" is the full path of a .xml file"
             [string]$PathOfXMLFile = Validate-XMLPath -XMLFilePath $FilePath
         }
         catch {
-            ### <summary>
             ### In case of error, the script will ask to provide again the full path of the .xml file
-            ### </summary>
             [string]$PathOfXMLFile = Ask-ForXMLPath -NumberOfChecks $NumberOfChecks
         }
     }
-    ### <summary>
     ### If no FilePath was provided, the script will ask to provide the full path of the .xml file
-    ### </summary>
     else{
         [string]$PathOfXMLFile = Ask-ForXMLPath -NumberOfChecks $TheNumberOfChecks
     }
 
-    ### <summary>
     ### If PathOfXMLFile variable will match "NotAValidXMLFile|NotAValidPath|ValidationOfFileFailed", we will continue the data collection
     ### using other methods.
-    ### </summary>    
     if ($PathOfXMLFile -match "NotAValidXMLFile|NotAValidPath|ValidationOfFileFailed") {
         [int]$TheNumberOfChecks = 1
     
-        ### <summary>
         ### TheAffectedUser variable will represent the Affected user for which we will try to collect mailbox migration related logs
-        ### </summary> 
         Write-Log "[INFO] || Trying to collect the AffectedUser..."
         [string]$TheAffectedUser = Ask-ForDetailsAboutUser -NumberOfChecks $TheNumberOfChecks
         
-        ### <summary>
         ### TheMigrationType variable will represent the Migration type for which the logs have to be investigated
-        ### </summary>
         Write-Log "[INFO] || Trying to collect the Migration Type..."
         [string]$TheMigrationType = Ask-DetailsAboutMigrationType -NumberOfChecks $TheNumberOfChecks -AffectedUser $TheAffectedUser
 
-        ### <summary>
         ### TheMigrationLogs variable will represent MigrationLogs collected using the Selected-ConnectToExchangeOnlineOption function.
-        ### </summary>
         Write-Log "[INFO] || Trying to collect the Migration Logs using Selected-FileOption -> Selected-ConnectToExchangeOnlineOption function..."
         $script:TheMigrationLogs = Selected-ConnectToExchangeOnlineOption -AffectedUser $TheAffectedUser -MigrationType $TheMigrationType
     }
     else {
-        ### <summary>
         ### TheMigrationLogs variable will represent MigrationLogs collected using the Collect-MigrationLogs function.
-        ### </summary>
         Write-Log "[INFO] || Trying to collect the Migration Logs using Selected-FileOption -> Collect-MigrationLogs function..."
-        $script:TheMigrationLogs = Collect-MigrationLogs -XMLFile $PathOfXMLFile
+        Collect-MigrationLogs -XMLFile $PathOfXMLFile
     }
 
-    return $script:TheMigrationLogs
 }
 
 ### <summary>
@@ -479,14 +419,10 @@ function Validate-XMLPath {
         $XMLFilePath
     )
 
-    ### <summary>
     ### Validating if the path has a length greater than 4, and if it is a of an .xml file
-    ### </summary>
     Write-Log "[INFO] || Checking if the FilePath is a valid .xml file, from PowerShell's perspective"
     if (($XMLFilePath.Length -gt 4) -and ($XMLFilePath -like "*.xml")) {
-        ### <summary>
         ### Validating if the .xml file was created by PowerShell
-        ### </summary>
         $fileToCheck = new-object System.IO.StreamReader($XMLFilePath)
         if ($fileToCheck.ReadLine() -like "*http://schemas.microsoft.com/powershell*") {
             Write-Host
@@ -494,10 +430,8 @@ function Validate-XMLPath {
             Write-Host " seems to be a valid .xml file. We will use it to continue the investigation." -ForegroundColor Green
             Write-Log ("[INFO] || $XMLFilePath seems to be a valid .xml file. We will use it to continue the investigation.") -NonInteractive $true
         }
-        ### <summary>
         ### If not, the script will set the XMLFilePath to NotAValidXMLFile. This will help in next checks, in order to start collecting the mailbox 
         ### migration logs using other methods
-        ### </summary>
         else {
             Write-Host $XMLFilePath -ForegroundColor Cyan -NoNewline
             Write-Host " is not a valid .xml file." -ForegroundColor Yellow
@@ -508,10 +442,8 @@ function Validate-XMLPath {
         $fileToCheck.Close()
 
     }
-    ### <summary>
     ### If the path's length is not greater than 4 characters and the file is not an .xml file the script will set XMLFilePath to NotAValidPath.
     ### This will help in next checks, in order to start collecting the mailbox migration logs using other methods
-    ### </summary>
     else {
         Write-Host $XMLFilePath -ForegroundColor Cyan -NoNewline
         Write-Host " is not a valid path." -ForegroundColor Yellow
@@ -519,9 +451,7 @@ function Validate-XMLPath {
         Write-Log ("[WARNING] || $XMLFilePath is not a valid .xml file. We will set: XMLFilePath = `"NotAValidPath`"") -NonInteractive $true
     }
     
-    ### <summary>
     ### The script returns the value of XMLFilePath 
-    ### </summary>
     return $XMLFilePath
 }
 
@@ -541,40 +471,30 @@ function Ask-ForXMLPath {
 
     [string]$PathOfXMLFile = ""
     if ($NumberOfChecks -eq "1") {
-        ### <summary>
         ### Asking to provide the full path of the .xml file for the first time
-        ### </summary>
         Write-Host
         Write-Log "[INFO] || We are asking to provide the path of the .xml file" -NonInteractive $true
         Write-Host "Please provide the path of the .xml file: " -ForegroundColor Cyan
         Write-Host "`t" -NoNewline
         try {
-            ### <summary>
             ### PathOfXMLFile variable will contain the full path of the .xml file, if it will be validated (it will be inserted from the keyboard)
-            ### </summary>
             $PathOfXMLFile = Validate-XMLPath -XMLFilePath (Read-Host)
         }
         catch {
-            ### <summary>
             ### If error, the script is doing the 1-time effort to collect again the full path of the .xml file
-            ### </summary>
             $NumberOfChecks++
             $PathOfXMLFile = Ask-ForXMLPath -NumberOfChecks $NumberOfChecks
         }
     }
     else {
-        ### <summary>
         ### The script is doing the 1-time effort to collect again the full path of the .xml file
-        ### </summary>
         Write-Host
         Write-Log "[INFO] || Asking to provide the path of the .xml file again" -NonInteractive $true
         Write-Host "Would you like to provide the path of the .xml file again?" -ForegroundColor Cyan
         Write-Host "`t[Y] Yes`t`t[N] No`t`t(default is `"N`"): " -NoNewline -ForegroundColor White
         $ReadFromKeyboard = Read-Host
 
-        ### <summary>
         ### Checking if the path will be provided again, or no. If no, we will continue to collect the mailbox migration logs, using other methods.
-        ### </summary>
         [bool]$TheKey = $false
         Switch ($ReadFromKeyboard) 
         { 
@@ -584,39 +504,29 @@ function Ask-ForXMLPath {
         }
 
         if ($TheKey) {
-            ### <summary>
             ### If YES was selected, we are asking to provide the path of the .xml file again
-            ### </summary>
             Write-Host
             Write-Host "Please provide again the path of the .xml file: " -ForegroundColor Cyan
             Write-Host "`t" -NoNewline
             try {
-                ### <summary>
                 ### Validating the path of the .xml file
-                ### </summary>
                 $PathOfXMLFile = Validate-XMLPath -XMLFilePath (Read-Host)
             }
             catch {
-                ### <summary>
                 ### If error, the script will set PathOfXMLFile to ValidationOfFileFailed, which will be used to collect the logs using other methods
-                ### </summary>
                 Write-Host "We will continue to collect the migration logs using other methods" -ForegroundColor Red
                 $PathOfXMLFile = "ValidationOfFileFailed"
             }
         }
         else {
-            ### <summary>
             ### If NO was selected, the script will set PathOfXMLFile to ValidationOfFileFailed, which will be used to collect the logs using other methods
-            ### </summary>
             Write-Host
             Write-Host "We will continue to collect the migration logs using other methods" -ForegroundColor Yellow
             $PathOfXMLFile = "ValidationOfFileFailed"
         }
     }
     
-    ### <summary>
     ### The function returns the full path of the .xml file, or ValidationOfFileFailed
-    ### </summary>
     return $PathOfXMLFile
 }
 
@@ -636,9 +546,7 @@ function Ask-ForDetailsAboutUser {
 
     Write-Host
     if ($NumberOfChecks -eq "1") {
-        ### <summary>
         ### Asking for the affected user, for the first time
-        ### </summary>
         Write-Log "[INFO] || Asking to provide the affected user, for the first time." -NonInteractive $true
         Write-Host "Please provide the username of the affected user (Eg.: " -NoNewline -ForegroundColor Cyan
         Write-Host "User1@contoso.com" -NoNewline -ForegroundColor White
@@ -648,9 +556,7 @@ function Ask-ForDetailsAboutUser {
         Write-Log ("[INFO] || The affected user provided is: $TheUserName") -NonInteractive $true
     }
     else {
-        ### <summary>
         ### Re-asking for the affected user
-        ### </summary>
         Write-Log "[INFO] || Re-asking to provide the affected user." -NonInteractive $true
         Write-Host "Please provide again the username of the affected user (Eg.: " -NoNewline -ForegroundColor Cyan
         Write-Host "User1@contoso.com" -NoNewline -ForegroundColor White
@@ -659,9 +565,7 @@ function Ask-ForDetailsAboutUser {
         Write-Log ("[INFO] || The affected user provided is: $TheUserName") -NonInteractive $true
     }
 
-    ### <summary>
     ### Validating if the user provided is the affected user
-    ### </summary>
     Write-Host
     Write-Host "You entered " -NoNewline -ForegroundColor Cyan
     Write-Host "$TheUserName" -NoNewline -ForegroundColor White
@@ -678,22 +582,16 @@ function Ask-ForDetailsAboutUser {
     }
 
     if ($TheKey) {
-        ### <summary>
         ### Received confirmation that the user provided is the affected user.
-        ### </summary>
         Write-Log ("[INFO] || Got confirmation that `"$TheUserName`" is indeed the affected user.") -NonInteractive $true
     }
     else {
-        ### <summary>
         ### The user provided is not the affected user. Asking again for the affected user.
-        ### </summary>
         Write-Log ("[WARNING] || `"$TheUserName`" is not the affected user. Starting over the process of asking for the affected user.") -NonInteractive $true
         [string]$TheUserName = Ask-ForDetailsAboutUser -NumberOfChecks $NumberOfChecks
     }
 
-    ### <summary>
     ### The function will return the affected user
-    ### </summary>
     return $TheUserName
 }
 
@@ -716,9 +614,7 @@ function Ask-DetailsAboutMigrationType {
 
     Write-Host
     if ($NumberOfChecks -eq "1") {
-        ### <summary>
         ### Asking about the migration type, for the first time
-        ### </summary>
         Write-Log "[INFO] || Asking about the migration type, for the first time" -NonInteractive $true
         Write-Host "Please select the " -NoNewline -ForegroundColor Cyan
         Write-Host "Migration Type" -NoNewline -ForegroundColor White
@@ -744,9 +640,7 @@ function Ask-DetailsAboutMigrationType {
         $NumberOfChecks++
     }
     else {
-        ### <summary>
         ### Re-asking about the migration type
-        ### </summary>
         Write-Log ("[INFO] || Re-asking about the migration type ($NumberOfChecks)") -NonInteractive $true
         Write-Host "Please select again the " -NoNewline -ForegroundColor Cyan
         Write-Host "Migration Type" -NoNewline -ForegroundColor White
@@ -794,9 +688,7 @@ function Ask-DetailsAboutMigrationType {
         [string]$MigrationType = Ask-DetailsAboutMigrationType -NumberOfChecks $NumberOfChecks -AffectedUser $AffectedUser
     }
 
-    ### <summary>
     ### The function returns the migration type
-    ### </summary>
     return $MigrationType
 }
 
@@ -818,9 +710,7 @@ function Selected-ConnectToExchangeOnlineOption {
         $TheAdminAccount
     )
 
-    ### <summary>
     ### We will try to connect to Exchange Online
-    ### </summary>
     $ThePSSession = ConnectTo-ExchangeOnline -TheAdminAccount $TheAdminAccount
 
 <#
@@ -963,11 +853,9 @@ function Collect-MigrationLogs {
     )
     
     if ($XMLFile) {
-        ### <summary>
         ### Importing data in the MigrationLogsToAnalyze (Scope: Script) variable
-        ### </summary>
         Write-Log ("[INFO] || Importing data from `"$XMLFile`" file, in the MigrationLogsToAnalyze variable" )
-        $script:MigrationLogsToAnalyze = Import-Clixml $XMLFile
+        $script:TheMigrationLogs = Import-Clixml $XMLFile
     }
     elseif ($ConnectToExchangeOnline) {
         Write-Host "This part is not yet implemented" -ForegroundColor Red
@@ -988,6 +876,21 @@ $script:TheWorkingDirectory = Create-WorkingDirectory -NumberOfChecks 1
 Create-LogFile -WorkingDirectory $script:TheWorkingDirectory
 
 Check-Parameters
+
+#region ForTestPurposes - This will be removed
+
+Write-Host
+Write-Host "Details from the mailbox migration log:" -ForegroundColor Green
+
+Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
+Write-Host "$($TheMigrationLogs.MailboxIdentity.Name)" -ForegroundColor White
+Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
+Write-Host "$($TheMigrationLogs.Status.Value)" -ForegroundColor White
+Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
+Write-Host "$($TheMigrationLogs.StatusDetail.Value)" -ForegroundColor White
+
+#endregion ForTestPurposes
+
 #Show-Menu
 
 Restore-OriginalState
