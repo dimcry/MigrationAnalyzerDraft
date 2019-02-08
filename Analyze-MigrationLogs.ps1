@@ -64,36 +64,36 @@ The logic:
 #>
 
 <#
-A.	Necessary modules:
-    1.	Collect the migration logs (related to one or multiple affected mailboxes):
-        a.	From an existing .xml file;
-        b.	From Exchange Online, by using the correct command:
+A.    Necessary modules:
+    1.    Collect the migration logs (related to one or multiple affected mailboxes):
+        a.    From an existing .xml file;
+        b.    From Exchange Online, by using the correct command:
             i.      For Hybrid;
             ii.     For IMAP;
             iii.    For Cutover / Staged.
 
-        c.	From Get-MailboxStatistics output, if we speak about Remote moves (Hybrid), in case customer already removed the MoveRequest:
-            i.	From Exchange Online, if we speak about an Onboarding;
-            ii.	From Exchange On-Premises, if we speak about an Offboarding.
+        c.    From Get-MailboxStatistics output, if we speak about Remote moves (Hybrid), in case customer already removed the MoveRequest:
+            i.    From Exchange Online, if we speak about an Onboarding;
+            ii.    From Exchange On-Premises, if we speak about an Offboarding.
 
-    2.	Download the JSON file from GitHub, and, based on the error received, based on the Migration type, we will provide recommendation about the actions that they can take to solve the issue.
+    2.    Download the JSON file from GitHub, and, based on the error received, based on the Migration type, we will provide recommendation about the actions that they can take to solve the issue.
 
-B.	Good to have modules:
-    1.	Performance analyzer. Similar to what Karahan provided in his script;
-    2.	DiagnosticInfo analyzer.
-        a.	Using Build-TimeTrackerTable function from Angus’s module, I’ll parse the DiagnosticInfo details, and provide some information to customer.
-        b.	Using the idea described here, I’ll create a function that will provide a Column/Bar Chart similar to (this is screen shot provided by Angus long time ago, from a Pivot Table created in Excel, based on some information created with the above mentioned function):
+B.    Good to have modules:
+    1.    Performance analyzer. Similar to what Karahan provided in his script;
+    2.    DiagnosticInfo analyzer.
+        a.    Using Build-TimeTrackerTable function from Angus’s module, I’ll parse the DiagnosticInfo details, and provide some information to customer.
+        b.    Using the idea described here, I’ll create a function that will provide a Column/Bar Chart similar to (this is screen shot provided by Angus long time ago, from a Pivot Table created in Excel, based on some information created with the above mentioned function):
 
             EURPRD10> $timeline = Build-TimeTrackerTable -MrsJob $stat
             EURPRD10> $timeline | Export-Csv 'tmp.csv'
 
 
-C.	Priority of modules:
+C.    Priority of modules:
     Should be present in Version 1:     A.1., A.2., B.2.a.
     Can be introduced in Version 2.:    B.1., B.2.b.
 
 
-D.	Resource estimates:
+D.    Resource estimates:
 
     From time perspective:
         Task name   Working hours   Expected completion time
@@ -271,7 +271,7 @@ Function Restore-OriginalState {
 ### on the screen, too.</param>
 Function Write-Log {
     [CmdletBinding()]
-	Param (
+    Param (
         [parameter(Position=0)]
         [string]
         $string,
@@ -279,17 +279,17 @@ Function Write-Log {
         [bool]
         $NonInteractive
     )
-	
-	### Collecting the current date
+    
+    ### Collecting the current date
     [string]$date = Get-Date -Format G
-		
-	### Write everything to LogFile
+        
+    ### Write everything to LogFile
     ( "[" + $date + "] || " + $string) | Out-File -FilePath $script:LogFile -Append
-	
-	### In case NonInteractive is not True, write on display, too
+    
+    ### In case NonInteractive is not True, write on display, too
     if (!($NonInteractive)){
-		( "[" + $date + "] || " + $string) | Write-Host
-	}
+        ( "[" + $date + "] || " + $string) | Write-Host
+    }
 }
 
 ### <summary>
@@ -701,7 +701,7 @@ function Ask-DetailsAboutMigrationType {
 ### <param name="TheAdminAccount">TheAdminAccount represents username of an Admin that we will use in order to connect to Exchange Online </param>
 function Selected-ConnectToExchangeOnlineOption {
     [CmdletBinding()]
-	Param (
+    Param (
         [string]
         $AffectedUser,        
         [string]
@@ -748,74 +748,74 @@ Function ConnectTo-ExchangeOnline {
         $script:Credential = Get-Credential -UserName $TheAdminAccount -Message "Please provide credentials to connect to Exchange Online:"
     }
 
-	# If we don't have a credential then prompt for it
-	$i = 0
-	while (($script:Credential -eq $Null) -and ($i -lt 5)){
-		$script:Credential = Get-Credential -Message "Please provide your Exchange Online Credentials"
-		$i++
-	}
-	
-	# If we still don't have a credentail object then abort
-	if ($Credential -eq $null){
-		Write-Log "[Error] || Failed to get credentials"
-	}
+    # If we don't have a credential then prompt for it
+    $i = 0
+    while (($script:Credential -eq $Null) -and ($i -lt 5)){
+        $script:Credential = Get-Credential -Message "Please provide your Exchange Online Credentials"
+        $i++
+    }
+    
+    # If we still don't have a credentail object then abort
+    if ($Credential -eq $null){
+        Write-Log "[Error] || Failed to get credentials"
+    }
 
-	Write-Log "[INFO] || Removing all PS Sessions"
+    Write-Log "[INFO] || Removing all PS Sessions"
 
-	# Destroy any outstanding PS Session
-	Get-PSSession | Remove-PSSession -Confirm:$false
-	
-	# Force Garbage collection just to try and keep things more agressively cleaned up due to some issue with large memory footprints
-	[System.GC]::Collect()
-	
-	# Sleep 15s to allow the sessions to tear down fully
-	Write-Log "[INFO] || Sleeping 15 seconds for Session Tear Down"
-	Start-SleepWithProgress -SleepTime 15
+    # Destroy any outstanding PS Session
+    Get-PSSession | Remove-PSSession -Confirm:$false
+    
+    # Force Garbage collection just to try and keep things more agressively cleaned up due to some issue with large memory footprints
+    [System.GC]::Collect()
+    
+    # Sleep 15s to allow the sessions to tear down fully
+    Write-Log "[INFO] || Sleeping 15 seconds for Session Tear Down"
+    Start-SleepWithProgress -SleepTime 15
 
-	# Clear out all errors
-	$Error.Clear()
-	
-	# Create the session
-	Write-Log "[INFO] || Creating new PS Session"
-	
-	$session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri "https://outlook.office365.com/powershell-liveid/" -Credential $Credential -Authentication Basic -AllowRedirection
-		
-	# Check for an error while creating the session
-	if ($Error.Count -gt 0){
-	
-		Write-Log "[ERROR] || Error while setting up session"
-		Write-log ("[ERROR] || $Error")
-		
-		# Increment our error count so we abort after so many attempts to set up the session
-		$ErrorCount++
-		
-		# if we have failed to setup the session > 3 times then we need to abort because we are in a failure state
-		if ($ErrorCount -gt 3){
-		
-			Write-log "[ERROR] || Failed to setup session after multiple tries"
-			Write-log "[ERROR] || Aborting Script"
-			exit
-		
-		}
-		
-		# If we are not aborting then sleep 60s in the hope that the issue is transient
-		Write-Log "[INFO] || Sleeping 60s so that issue can potentially be resolved"
-		Start-SleepWithProgress -sleeptime 60
-		
-		# Attempt to set up the sesion again
-		New-CleanO365Session
-	}
-	
-	# If the session setup worked then we need to set $errorcount to 0
-	else {
-		$ErrorCount = 0
-	}
-	
-	# Import the PS session
-	$null = Import-PSSession $session -AllowClobber -Prefix EXO
-	
-	# Set the Start time for the current session
-	Set-Variable -Scope script -Name SessionStartTime -Value (Get-Date)
+    # Clear out all errors
+    $Error.Clear()
+    
+    # Create the session
+    Write-Log "[INFO] || Creating new PS Session"
+    
+    $session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri "https://outlook.office365.com/powershell-liveid/" -Credential $Credential -Authentication Basic -AllowRedirection
+        
+    # Check for an error while creating the session
+    if ($Error.Count -gt 0){
+    
+        Write-Log "[ERROR] || Error while setting up session"
+        Write-log ("[ERROR] || $Error")
+        
+        # Increment our error count so we abort after so many attempts to set up the session
+        $ErrorCount++
+        
+        # if we have failed to setup the session > 3 times then we need to abort because we are in a failure state
+        if ($ErrorCount -gt 3){
+        
+            Write-log "[ERROR] || Failed to setup session after multiple tries"
+            Write-log "[ERROR] || Aborting Script"
+            exit
+        
+        }
+        
+        # If we are not aborting then sleep 60s in the hope that the issue is transient
+        Write-Log "[INFO] || Sleeping 60s so that issue can potentially be resolved"
+        Start-SleepWithProgress -sleeptime 60
+        
+        # Attempt to set up the sesion again
+        New-CleanO365Session
+    }
+    
+    # If the session setup worked then we need to set $errorcount to 0
+    else {
+        $ErrorCount = 0
+    }
+    
+    # Import the PS session
+    $null = Import-PSSession $session -AllowClobber -Prefix EXO
+    
+    # Set the Start time for the current session
+    Set-Variable -Scope script -Name SessionStartTime -Value (Get-Date)
 }
 
 ### <summary>
@@ -828,7 +828,7 @@ Function ConnectTo-ExchangeOnline {
 ### the output of Get-MailboxStatistics (the MoveHistory part), for the affected user </param>
 function Collect-MigrationLogs {
     [CmdletBinding()]
-	Param (
+    Param (
         [parameter(Mandatory=$true,
         ParameterSetName="XMLFile")]
         [string]
