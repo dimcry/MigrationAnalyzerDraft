@@ -263,6 +263,9 @@ function Create-WorkingDirectory {
         Write-Host "`tShort path: " -ForegroundColor Cyan -NoNewline
         $TheShortPath = ($WorkingDirectoryToUse -split "MigrationAnalyzer")[1]
         Write-Host "`%temp`%\MigrationAnalyzer$TheShortPath" -ForegroundColor White
+
+        # Keep track of the old location so we can restore it at the end
+        $script:OriginalLocation = Get-Location
         Set-Location -Path $WorkingDirectoryToUse
     }
 
@@ -271,6 +274,15 @@ function Create-WorkingDirectory {
     ### we were unable to create the Working directory.
     ### </summary>  
     return $WorkingDirectoryToUse
+}
+
+### <summary>
+### Restores the original state of the console, like current directory, etc.
+### </summary>
+Function Restore-OriginalState {
+    if ($script:OriginalLocation) {
+        Set-Location -Path $script:OriginalLocation
+    }
 }
 
 ### <summary>
@@ -340,6 +352,8 @@ function Create-LogFile {
         Write-Host "You do not have permissions to create files under: " -ForegroundColor Red -NoNewline
         Write-Host "$WorkingDirectory" -ForegroundColor White
         Write-Host "The script will exit now..." -ForegroundColor Red
+
+        Restore-OriginalState
         Exit
     }
 
@@ -975,6 +989,8 @@ Create-LogFile -WorkingDirectory $script:TheWorkingDirectory
 
 Check-Parameters
 #Show-Menu
+
+Restore-OriginalState
 
 #endregion Main script
 
