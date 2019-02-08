@@ -903,7 +903,7 @@ Function ConnectTo-ExchangeOnline {
 		if ($ErrorCount -gt 3){
 		
 			Write-log "[ERROR] || Failed to setup session after multiple tries"
-            Write-log "[ERROR] || Aborting Script"
+			Write-log "[ERROR] || Aborting Script"
 			exit
 		
 		}
