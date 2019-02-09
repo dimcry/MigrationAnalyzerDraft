@@ -426,10 +426,8 @@ function Validate-XMLPath {
         ### If not, the script will set the XMLFilePath to NotAValidXMLFile. This will help in next checks, in order to start collecting the mailbox 
         ### migration logs using other methods
         else {
-            Write-Host $XMLFilePath -ForegroundColor Cyan -NoNewline
-            Write-Host " is not a valid .xml file." -ForegroundColor Yellow
+            Write-Log ("[WARNING] || $XMLFilePath is not a valid .xml file. We will set: XMLFilePath = `"NotAValidXMLFile`"") -ForegroundColor Yellow
             $XMLFilePath = "NotAValidXMLFile"
-            Write-Log ("[WARNING] || $XMLFilePath is not a valid .xml file. We will set: XMLFilePath = `"NotAValidXMLFile`"") -NonInteractive $true
         }
         
         $fileToCheck.Close()
@@ -438,10 +436,8 @@ function Validate-XMLPath {
     ### If the path's length is not greater than 4 characters and the file is not an .xml file the script will set XMLFilePath to NotAValidPath.
     ### This will help in next checks, in order to start collecting the mailbox migration logs using other methods
     else {
-        Write-Host $XMLFilePath -ForegroundColor Cyan -NoNewline
-        Write-Host " is not a valid path." -ForegroundColor Yellow
+        Write-Log ("[WARNING] || $XMLFilePath is not a valid .xml file. We will set: XMLFilePath = `"NotAValidPath`"") -ForegroundColor Yellow
         $XMLFilePath = "NotAValidPath"
-        Write-Log ("[WARNING] || $XMLFilePath is not a valid .xml file. We will set: XMLFilePath = `"NotAValidPath`"") -NonInteractive $true
     }
     
     ### The script returns the value of XMLFilePath 
@@ -663,7 +659,7 @@ function Ask-DetailsAboutMigrationType {
     Write-Host ". Is this correct?" -ForegroundColor Cyan
     Write-Host "`t[Y] Yes     [N] No      (default is `"Y`"): " -NoNewline -ForegroundColor White
     $ReadFromKeyboard = Read-Host
-    Write-Log "[IMFO] || You selected the following: `"Migration Type: $MigrationType`"; `"Is this correct? $ReadFromKeyboard`"" -NonInteractive $true
+    Write-Log "[INFO] || You selected the following: `"Migration Type: $MigrationType`"; `"Is this correct? $ReadFromKeyboard`"" -NonInteractive $true
 
     [bool]$TheKey = $true
     Switch ($ReadFromKeyboard) 
@@ -750,7 +746,7 @@ Function ConnectTo-ExchangeOnline {
     
     # If we still don't have a credentail object then abort
     if ($Credential -eq $null){
-        Write-Log "[Error] || Failed to get credentials"
+        Write-Log "[ERROR] || Failed to get credentials" -ForegroundColor Red
     }
 
     Write-Log "[INFO] || Removing all PS Sessions"
@@ -776,8 +772,8 @@ Function ConnectTo-ExchangeOnline {
     # Check for an error while creating the session
     if ($Error.Count -gt 0){
     
-        Write-Log "[ERROR] || Error while setting up session"
-        Write-log ("[ERROR] || $Error")
+        Write-Log "[ERROR] || Error while setting up session" -ForegroundColor Red
+        Write-log ("[ERROR] || $Error") -ForegroundColor Red
         
         # Increment our error count so we abort after so many attempts to set up the session
         $ErrorCount++
