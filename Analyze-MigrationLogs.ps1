@@ -215,9 +215,7 @@ function Create-WorkingDirectory {
     
         ### If entered value will be empty, the script will exit.
         if (-not ($WorkingDirectoryToUse)) {
-            Write-Host
-            Write-Host "No valid path was provided. The script will exit now." -ForegroundColor Red
-            Exit
+            throw "No valid path was provided."
         }
         else {
             ### Doing 1-time effort to create the Working Directory in the location inserted from keyboard
@@ -226,11 +224,7 @@ function Create-WorkingDirectory {
             }
             catch {
                 ### In case of error, we will exit the script.
-                Write-Host
-                Write-Host "We were unable to create the Working Directory under: " -ForegroundColor Red -NoNewline
-                Write-Host "$WorkingDirectoryToUse" -ForegroundColor White
-                Write-Host "The script will exit now." -ForegroundColor Red
-                Exit
+                throw "We were unable to create the Working Directory under: $WorkingDirectoryToUse"
             }
         }
     }
@@ -277,18 +271,24 @@ Function Write-Log {
         $string,
         [parameter(Position=1)]
         [bool]
-        $NonInteractive
+        $NonInteractive,
+        [parameter(Position=2)]
+        [ConsoleColor]
+        $ForegroundColor = "White"
     )
-    
+
     ### Collecting the current date
     [string]$date = Get-Date -Format G
         
     ### Write everything to LogFile
-    ( "[" + $date + "] || " + $string) | Out-File -FilePath $script:LogFile -Append
+
+    if ($script:LogFile) {
+        ( "[" + $date + "] || " + $string) | Out-File -FilePath $script:LogFile -Append
+    }
     
     ### In case NonInteractive is not True, write on display, too
     if (!($NonInteractive)){
-        ( "[" + $date + "] || " + $string) | Write-Host
+        ( "[" + $date + "] || " + $string) | Write-Host -ForegroundColor $ForegroundColor
     }
 }
 
@@ -314,14 +314,7 @@ function Create-LogFile {
     }
     catch {
         ### In case of error, the script will exit.
-        Write-Host
-        Write-Host "You do not have permissions to create files under: " -ForegroundColor Red -NoNewline
-        Write-Host "$WorkingDirectory" -ForegroundColor White
-        Write-Host "The script will exit now..." -ForegroundColor Red
-
-        Restore-OriginalState
-        
-        Exit
+        throw "You do not have permissions to create files under: $WorkingDirectory"
     }
 
     ### In case of success, we will log the first entry in the LogFile.
@@ -790,12 +783,8 @@ Function ConnectTo-ExchangeOnline {
         $ErrorCount++
         
         # if we have failed to setup the session > 3 times then we need to abort because we are in a failure state
-        if ($ErrorCount -gt 3){
-        
-            Write-log "[ERROR] || Failed to setup session after multiple tries"
-            Write-log "[ERROR] || Aborting Script"
-            exit
-        
+        if ($ErrorCount -gt 3) {
+            throw "Failed to setup session after multiple tries"
         }
         
         # If we are not aborting then sleep 60s in the hope that the issue is transient
@@ -872,28 +861,34 @@ function Collect-MigrationLogs {
 ###############
 #region Main script
 
-$script:TheWorkingDirectory = Create-WorkingDirectory -NumberOfChecks 1
-Create-LogFile -WorkingDirectory $script:TheWorkingDirectory
+try {
+    $script:TheWorkingDirectory = Create-WorkingDirectory -NumberOfChecks 1
+    Create-LogFile -WorkingDirectory $script:TheWorkingDirectory
 
-Check-Parameters
+    Check-Parameters
 
-#region ForTestPurposes - This will be removed
+    #region ForTestPurposes - This will be removed
 
-Write-Host
-Write-Host "Details from the mailbox migration log:" -ForegroundColor Green
+    Write-Host
+    Write-Host "Details from the mailbox migration log:" -ForegroundColor Green
 
-Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
-Write-Host "$($TheMigrationLogs.MailboxIdentity.Name)" -ForegroundColor White
-Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
-Write-Host "$($TheMigrationLogs.Status.Value)" -ForegroundColor White
-Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
-Write-Host "$($TheMigrationLogs.StatusDetail.Value)" -ForegroundColor White
+    Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
+    Write-Host "$($TheMigrationLogs.MailboxIdentity.Name)" -ForegroundColor White
+    Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
+    Write-Host "$($TheMigrationLogs.Status.Value)" -ForegroundColor White
+    Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
+    Write-Host "$($TheMigrationLogs.StatusDetail.Value)" -ForegroundColor White
 
-#endregion ForTestPurposes
+    #endregion ForTestPurposes
 
-#Show-Menu
-
-Restore-OriginalState
+    #Show-Menu
+} catch {
+    Write-Log "[ERROR] || $_" -ForegroundColor Red
+    Write-Log "[ERROR] || Script will now exit" -ForegroundColor Red
+}
+finally {
+    Restore-OriginalState
+}
 
 #endregion Main script
 
