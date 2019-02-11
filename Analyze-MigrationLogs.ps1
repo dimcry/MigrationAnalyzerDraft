@@ -952,10 +952,10 @@ function Collect-MailboxStatistics {
     )
 
     if ($TheEnvironment -eq "Exchange Online") {
-        [string]$TheCommand = "(Get-"+ $script:EXOCommandsPrefix + "MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory).MoveHistory | where {(`$(`$_.WorkloadType.Value) -eq `"Onboarding`") -or (`$(`$_.WorkloadType) -eq `"Onboarding`")} | select -First 1"
+        [string]$TheCommand = "(Get-"+ $script:EXOCommandsPrefix + "MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory -ErrorAction Stop).MoveHistory | where {[string]`$(`$_.WorkloadType.Value) -eq `"Onboarding`"} | select -First 1"
     }
     else {
-        [string]$TheCommand = "(Get-MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory).MoveHistory | where {(`$(`$_.WorkloadType.Value) -eq `"Offboarding`") -or (`$(`$_.WorkloadType) -eq `"Offboarding`")} | select -First 1"
+        [string]$TheCommand = "(Get-MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory -ErrorAction Stop).MoveHistory | where {[string]`$(`$_.WorkloadType) -eq `"Offboarding`"} | select -First 1"
     }
 
     foreach ($User in $AffectedUsers) {
@@ -1020,22 +1020,26 @@ function Extract-CorrectListOfUsersForMailboxStatistics {
     foreach ($User in $TheAffectedUsers) {
         Write-Log ("[INFO] || Verifying if the $User user is an UserMailbox in $TheEnvironment")
         try {
-            $GetUser = Get-User $User -Filter "RecipientType -eq 'UserMailbox'" -ResultSize Unlimited -ErrorAction Stop
+            if ($TheEnvironment -eq "Exchange Online") {
+                [string]$TheCommand = "Get-"+ $script:EXOCommandsPrefix + "Recipient `$User -ResultSize Unlimited -ErrorAction Stop"
+            }
+            else {
+                [string]$TheCommand = "Get-Recipient `$User -ResultSize Unlimited -ErrorAction Stop"
+            }
+            $GetRecipient = Invoke-Expression $TheCommand
             Write-Log ("[INFO] || $User user is an UserMailbox in $TheEnvironment")
             Write-Log ("[INFO] || Details about the user:`n`tUserPrincipalName: $($GetUser.UserPrincipalName)`n`tSamAccountName: $($GetUser.SamAccountName)`n`tOrganizationalUnit: $($GetUser.OrganizationalUnit)`n`tDistinguishedName: $($GetUser.DistinguishedName)`n`tGuid: $($GetUser.Guid)`n`tRecipientTypeDetails: $($GetUser.RecipientTypeDetails)") -NonInteractive $true
             Write-Host "Details about the user:" -ForegroundColor Green
-            Write-Host "`tUserPrincipalName: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetUser.UserPrincipalName)" -ForegroundColor White
-            Write-Host "`tSamAccountName: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetUser.SamAccountName)" -ForegroundColor White
+            Write-Host "`tPrimarySMTPAddress: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetRecipient.PrimarySMTPAddress)" -ForegroundColor White
             Write-Host "`tOrganizationalUnit: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetUser.OrganizationalUnit)" -ForegroundColor White
+            Write-Host "$($GetRecipient.OrganizationalUnit)" -ForegroundColor White
             Write-Host "`tDistinguishedName: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetUser.DistinguishedName)" -ForegroundColor White
+            Write-Host "$($GetRecipient.DistinguishedName)" -ForegroundColor White
             Write-Host "`tGuid: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetUser.Guid)" -ForegroundColor White
+            Write-Host "$($GetRecipient.Guid)" -ForegroundColor White
             Write-Host "`tRecipientTypeDetails: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetUser.RecipientTypeDetails)" -ForegroundColor White
+            Write-Host "$($GetRecipient.RecipientTypeDetails)" -ForegroundColor White
             Write-Host
 
             Write-Log ("[INFO] || Adding $User user to the UsersOK variable")
@@ -1080,7 +1084,7 @@ function CheckIf-ExchangeManagementShell {
     [bool]$ExchangeManagementShell = $false
     ### Checking if the script was started in Exchange Management Shell
     try {
-        Get-Command Get-ExBlog -ErrorAction Stop
+        $null = Get-Command Get-ExBlog -ErrorAction Stop
         Write-Log "[INFO] || The script was started from Exchange Management Shell"
         $ExchangeManagementShell = $true
     }
@@ -1185,11 +1189,11 @@ try {
         Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
         Write-Host "$($Entry.MailboxIdentity.Name)" -ForegroundColor White
         Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
-        Write-Host "$($Entry.Status.Value)" -ForegroundColor White
+        Write-Host "$([string]$Entry.Status)" -ForegroundColor White
         Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
-        Write-Host "$($Entry.StatusDetail.Value)" -ForegroundColor White
+        Write-Host "$([string]$Entry.StatusDetail)" -ForegroundColor White
         Write-Host "`tExchangeGuid: " -ForegroundColor Cyan -NoNewline
-        Write-Host "$($Entry.ExchangeGuid.Guid)" -ForegroundColor White
+        Write-Host "$([string]$Entry.ExchangeGuid)" -ForegroundColor White
         Write-Host
     }
     #endregion ForTestPurposes
