@@ -135,7 +135,6 @@ Param(
     [string]$MigrationType,
 
     [Parameter(ParameterSetName = "ConnectToExchangeOnline", Mandatory = $false)]
-    [Parameter(ParameterSetName = "ConnectToExchangeOnPremises", Mandatory = $false)]
     [string]$AdminAccount
 )
 
@@ -145,6 +144,12 @@ Param(
 # Common space for functions, global variables #
 ################################################
 #region Functions, Global variables
+
+### LogsToAnalyze (Scope: Script) variable will contain mailbox migration logs for all affected users
+[System.Collections.ArrayList]$script:LogsToAnalyze = @()
+### EXOCommandsPrefix (Scope: Script) variable will be used to create a new PSSession to Exchange Online.
+### When importing the PSSession, the script will use "MAEXO" (Migration Analyzer EXO) as Prefix for each command
+[string]$script:EXOCommandsPrefix = "MAEXO"
 
 
 ### <summary>
@@ -288,6 +293,7 @@ Function Write-Log {
     
     ### In case NonInteractive is not True, write on display, too
     if (!($NonInteractive)){
+        Write-Host
         ( "[" + $date + "] || " + $string) | Write-Host -ForegroundColor $ForegroundColor
     }
 }
@@ -332,15 +338,93 @@ function Check-Parameters {
         Selected-FileOption -FilePath $FilePath
     }
     ### If ConnectToExchangeOnline parameter of the script was used, we will continue on this path.
-    elseif (ConnectToExchangeOnline) {
-        Selected-ConnectToExchangeOnlineOption -FilePath $FilePath
-        New-CleanO365Session 
+    elseif ($ConnectToExchangeOnline) {
+        throw "This option is not implemented yet."
+        <#
+        Write-Log ("[INFO] || The script was started with the ConnectToExchangeOnline parameter: `"-ConnectToExchangeOnline:$true -AffectedUsers $AffectedUsers -MigrationType $MigrationType -TheAdminAccount $AdminAccount`"")
+        Selected-ConnectToExchangeOnlineOption -TheAffectedUsers $AffectedUsers -MigrationType $MigrationType -TheAdminAccount $AdminAccount
+        #>
     }
     ### If ConnectToExchangeOnPremises parameter of the script was used, we will continue on this path.
-    elseif (ConnectToExchangeOnPremises) {
-        
+    elseif ($ConnectToExchangeOnPremises) {
+        Write-Log ("[INFO] || The script was started with the ConnectToExchangeOnPremises parameter.")
+        Selected-ConnectToExchangeOnPremisesOption -TheAffectedUsers $AffectedUsers
+    }
+    ### If the script was started without any parameters, we will provide a menu in order to continue
+    else {
+        Show-Menu
     }
 }
+
+
+### <summary>
+### Show-Menu function is used if the script is started without any parameters
+### </summary>
+### <param name="WorkingDirectory">WorkingDirectory parameter is used get the location on which the LogFile will be created.</param>
+function Show-Menu {
+
+    $menu=@"
+
+1 => If you have the migration logs in an .xml file
+2 => If you want to connect to Exchange Online in order to collect the logs
+3 => If you need to connect to Exchange On-Premises and collect the logs
+Q => Quit
+
+Select a task by number, or, Q to quit: 
+"@
+    $menuprompt = $null
+
+    Write-Log "[INFO] || Loading the menu..." -NonInteractive $true
+
+    Clear-Host
+    $title = "=== Mailbox migration analyzer ==="
+    if (!($menuprompt)) 
+    {
+        $menuprompt+="="*$title.Length
+    }
+    Write-Host $menuprompt
+    Write-Host $title
+    Write-Host $menuprompt
+    Write-Host $menu -ForegroundColor Cyan -NoNewline
+    $SwitchFromKeyboard = Read-Host
+
+    ### Providing a list of options
+    Switch ($SwitchFromKeyboard) {
+
+        ### If "1" is selected, the script will assume you have the mailbox migration logs in an .xml file
+        "1" {
+            Write-Log "[INFO] || You selected to provide an .xml to be analyzed."
+            Selected-FileOption
+        }
+
+        ### If "2" is selected, the script will connect you to Exchange Online
+        "2" {
+            Write-Log "[INFO] || You selected to connect to Exchange Online and collect from there correct migration logs to be analyzed."
+            Selected-ConnectToExchangeOnlineOption
+        }
+ 
+        ### If "3" is selected, you started the script from On-Premises Exchange Management Shell
+        "3" {
+            Write-Log "[INFO] || You selected to connect to Exchange On-Premises and collect from there correct migration logs to be analyzed."
+            Write-Log "[WARNING] || In this situation the script have to be started from OnPremises Exchange Management Shell. If you haven't started from Exchange Management Shell, the script will fail." -ForegroundColor Yellow
+            Selected-ConnectToExchangeOnPremisesOption
+        }
+
+        ### If "Q" is selected, the script will exit
+        "Q" {
+            throw "You selected to quit the menu"
+         }
+ 
+        ### If you selected anything different than "1", "2", "3" or "Q", the Menu will reload
+        default {
+            Write-Log "[INFO] || You selected an option that is not present in the menu."
+            Write-Log "[INFO] || Press any key to re-load the menu"
+            Read-Host
+            Show-Menu
+        }
+    } 
+}
+
 
 ### <summary>
 ### Selected-FileOption function is used when the information is already saved on a .xml file.
@@ -699,10 +783,12 @@ function Selected-ConnectToExchangeOnlineOption {
         $TheAdminAccount
     )
 
+    throw "Not yet implemented"
+<#
     ### We will try to connect to Exchange Online
     $ThePSSession = ConnectTo-ExchangeOnline -TheAdminAccount $TheAdminAccount
 
-<#
+
     [int]$TheNumberOfChecks = 1
     [string]$ThePath = Ask-ForXMLPath -NumberOfChecks $TheNumberOfChecks
 
@@ -833,22 +919,250 @@ function Collect-MigrationLogs {
         [string]$MigrationType,
     
         [Parameter(ParameterSetName = "ConnectToExchangeOnline", Mandatory = $false)]
-        [Parameter(ParameterSetName = "ConnectToExchangeOnPremises", Mandatory = $false)]
         [string]$AdminAccount
     )
     
     if ($XMLFile) {
-        ### Importing data in the MigrationLogsToAnalyze (Scope: Script) variable
-        Write-Log ("[INFO] || Importing data from `"$XMLFile`" file, in the MigrationLogsToAnalyze variable" )
-        $script:TheMigrationLogs = Import-Clixml $XMLFile
+        ### Importing data in the LogsToAnalyze (Scope: Script) variable
+        Write-Log ("[INFO] || Importing data from `"$XMLFile`" file, in the LogsToAnalyze variable")
+        $TheMigrationLogs = Import-Clixml $XMLFile
+        foreach ($Log in $TheMigrationLogs) {
+            $void = $script:LogsToAnalyze.Add($Log)
+        }
     }
     elseif ($ConnectToExchangeOnline) {
+        ### Connecting to Exchange Online in order to collect the needed/correct mailbox migration logs
         Write-Host "This part is not yet implemented" -ForegroundColor Red
     }
     elseif ($ConnectToExchangeOnPremises) {
-        Write-Host "This part is not yet implemented" -ForegroundColor Red
+        ### Connecting to Exchange On-Premises in order to collect the outputs of relevant MoveHistory from Get-MailboxStatistics
+        Write-Log ("[INFO] || Collecting MoveHistory from Get-MailboxStatistics for each Affected users")
+        Collect-MailboxStatistics -AffectedUsers $AffectedUsers -TheEnvironment 'Exchange OnPremises'
     }
 }
+
+
+function Collect-MailboxStatistics {
+    param (
+        [string[]]
+        $AffectedUsers,
+        [ValidateSet("Exchange Online", "Exchange OnPremises")]
+        [string]
+        $TheEnvironment
+    )
+
+    if ($TheEnvironment -eq "Exchange Online") {
+        [string]$TheCommand = "(Get-"+ $script:EXOCommandsPrefix + "MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory).MoveHistory | where {(`$(`$_.WorkloadType.Value) -eq `"Onboarding`") -or (`$(`$_.WorkloadType) -eq `"Onboarding`")} | select -First 1"
+    }
+    else {
+        [string]$TheCommand = "(Get-MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory).MoveHistory | where {(`$(`$_.WorkloadType.Value) -eq `"Offboarding`") -or (`$(`$_.WorkloadType) -eq `"Offboarding`")} | select -First 1"
+    }
+
+    foreach ($User in $AffectedUsers) {
+        try {
+            Write-Log ("[INFO] || Running the following command:`n`t$TheCommand")
+            $MailboxStatistics = Invoke-Expression $TheCommand
+            Write-Log "[INFO] || MoveHistory successfully collected for `"$User`" user."
+            $void = $script:LogsToAnalyze.Add($MailboxStatistics)
+        }
+        catch {
+            Write-Log "[ERROR] || We were unable to collect MoveHistory from MailboxStatistics for `"$User`" user."
+        }
+    }
+}
+
+### <summary>
+### Selected-ConnectToExchangeOnPremisesOption function is used to collect mailbox migration logs from Exchange On-Premises (MoveHistory from Get-MailboxStatistics)
+### If this option will be selected, the script have to be started from the On-Premises Exchange Management Shell
+### </summary>
+### <param name="AffectedUser">AffectedUser represents the affected user for which we collect the mailbox migration logs </param>
+function Selected-ConnectToExchangeOnPremisesOption {
+    [CmdletBinding()]
+    Param (
+        [string[]]
+        $TheAffectedUsers
+    )
+
+    [bool]$ExchangeManagementShell = CheckIf-ExchangeManagementShell -ExchangeOnPremises
+
+    if (-not ($ExchangeManagementShell)) {
+        throw "Please start again the script, but, from OnPremises Exchange Management Shell."
+    }
+    else {
+        if (-not ($TheAffectedUsers)) {
+            Write-Log "[INFO] || Selected-ConnectToExchangeOnPremisesOption function was called, but, no affected user was provided."
+            Write-Log "[INFO] || The script will ask for an affected user."
+            [string]$TheAffectedUsers = Ask-ForDetailsAboutUser -NumberOfChecks $TheNumberOfChecks
+        }
+
+        [string[]]$TheAffectedUsers = Extract-CorrectListOfUsersForMailboxStatistics -TheAffectedUsers $TheAffectedUsers -TheEnvironment 'Exchange OnPremises'
+        Collect-MigrationLogs -ConnectToExchangeOnPremises -AffectedUsers $TheAffectedUsers
+    }
+}
+
+
+### <summary>
+### Extract-CorrectListOfUsersForMailboxStatistics function is used to check if the list of affected users can be used in order to collect MailboxStatistics output
+### </summary>
+### <param name="TheAffectedUsers">TheAffectedUsers represent the list of affected users for which we do the check </param>
+### <param name="TheEnvironment">TheEnvironment informs us about the environment in which we want to run the Get-MailboxStatistics command </param>
+function Extract-CorrectListOfUsersForMailboxStatistics {
+    param (
+        [string[]]
+        $TheAffectedUsers,
+        [ValidateSet("Exchange Online", "Exchange OnPremises")]
+        [string]$TheEnvironment
+    )
+
+    [System.Collections.ArrayList]$UsersOK = @()
+    [System.Collections.ArrayList]$UsersNotOK = @()
+    ### For each user, checking if they are UserMailbox as RecipientType in the mentioned environment
+    foreach ($User in $TheAffectedUsers) {
+        Write-Log ("[INFO] || Verifying if the $User user is an UserMailbox in $TheEnvironment")
+        try {
+            $GetUser = Get-User $User -Filter "RecipientType -eq 'UserMailbox'" -ResultSize Unlimited -ErrorAction Stop
+            Write-Log ("[INFO] || $User user is an UserMailbox in $TheEnvironment")
+            Write-Log ("[INFO] || Details about the user:`n`tUserPrincipalName: $($GetUser.UserPrincipalName)`n`tSamAccountName: $($GetUser.SamAccountName)`n`tOrganizationalUnit: $($GetUser.OrganizationalUnit)`n`tDistinguishedName: $($GetUser.DistinguishedName)`n`tGuid: $($GetUser.Guid)`n`tRecipientTypeDetails: $($GetUser.RecipientTypeDetails)") -NonInteractive $true
+            Write-Host "Details about the user:" -ForegroundColor Green
+            Write-Host "`tUserPrincipalName: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetUser.UserPrincipalName)" -ForegroundColor White
+            Write-Host "`tSamAccountName: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetUser.SamAccountName)" -ForegroundColor White
+            Write-Host "`tOrganizationalUnit: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetUser.OrganizationalUnit)" -ForegroundColor White
+            Write-Host "`tDistinguishedName: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetUser.DistinguishedName)" -ForegroundColor White
+            Write-Host "`tGuid: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetUser.Guid)" -ForegroundColor White
+            Write-Host "`tRecipientTypeDetails: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetUser.RecipientTypeDetails)" -ForegroundColor White
+            Write-Host
+
+            Write-Log ("[INFO] || Adding $User user to the UsersOK variable")
+
+            ### If found, added to the UsersOK list
+            $void = $UsersOK.Add($User)
+        }
+        catch {
+            ### If not found, added to the UsersNotOK list
+            Write-Log ("[WARNING] || Adding $User user to the UsersNotOK variable") -ForegroundColor Yellow
+            $void = $UsersNotOK.Add($User)
+        }
+    }
+
+    ### Throwing error if none of the affected users are UserMailboxes in the environment
+    if ($($UsersOK.Count) -eq 0) {
+        throw "The users provided do not have UserMailbox as RecipientType.`nIf the affected mailbox is in the Exchange Online environment, please restart the script from a PowerShell window that is not already connected to Exchange Online, and provide the PrimarySMTPAddress of the affected user.`nIf the script has to run on the Exchange OnPremises environment, please start a new Exchange Management Shell window, and start the script directly from it (using the -ConnectToExchangeOnPremises switch), and provide the PrimarySMTPAddress of the affected user."
+    }
+    elseif ($($UsersOK.Count) -gt 0) {
+        Write-Log ("[INFO] || List of users for which we will continue to collect the mailbox migration logs, using this method:`n`t$UsersOK")
+    }
+    
+    if ($($UsersNotOK.Count) -gt 0) {
+        Write-Log ("[WARNING] || List of users for which we will not continue to collect the mailbox migration logs:`n`t$UsersNotOK") -ForegroundColor Yellow
+    }
+
+    ### This function returns the list of users for which we can collect MailboxStatistics
+    return $UsersOK
+}
+
+
+### <summary>
+### CheckIf-ExchangeManagementShell function is used to check if the script was started from Exchange Management Shell.
+### </summary>
+### <param name="ExchangeOnPremises">ExchangeOnPremises will be used if the script is started with the ConnectToExchangeOnPremises parameter </param>
+function CheckIf-ExchangeManagementShell {
+    param (
+        [switch]
+        $ExchangeOnPremises
+    )
+
+    [bool]$ExchangeManagementShell = $false
+    ### Checking if the script was started in Exchange Management Shell
+    try {
+        Get-Command Get-ExBlog -ErrorAction Stop
+        Write-Log "[INFO] || The script was started from Exchange Management Shell"
+        $ExchangeManagementShell = $true
+    }
+    catch {
+        Write-Log "[INFO] || The script was not started from Exchange Management Shell"
+    }
+    
+    if ($ExchangeManagementShell) {
+        if (-not ($ExchangeOnPremises)) {
+            ### In case the script was not started with the ConnectToExchangeOnPremises parameter, the script will exit
+            throw "You started the script from Exchange Management Shell, even if you do not specifically want to run it in Exchange Management Shell.`nIf the script has to run on the Exchange Online environment, please restart the script from a PowerShell window that is not already connected to Exchange Online.`nIf the script has to run on the Exchange OnPremises environment, please start a new Exchange Management Shell window, and start the script directly from it (using the -ConnectToExchangeOnPremises switch)."
+        }
+        else {
+            ### In case the script was started with ConnectToExchangeOnPremises parameter, checking if we can use this EMS to continue
+            ### Checking how many modules were imported in this EMS using Import-PSSession command
+            $TheModules = Get-Module | where {($_.ModuleType -eq "Script") -and ($_.Name -like "tmp*")}
+    
+            if ($($TheModules.Count) -gt 0) {
+                ### If we find more than 1 module
+                Write-Log "[INFO] || Found $($TheModules.Count) modules of type `"Script`", for which the Name starts with `"tmp`""
+                [System.Collections.ArrayList]$script:EXOModules = @()
+                [System.Collections.ArrayList]$script:OnPremModules = @()
+                [System.Collections.ArrayList]$script:NotUsefulModules = @()
+                foreach ($Module in $TheModules) {
+                    ### Checking details for each module (if it's using any prefix, and if it is related to Exchange Online, or Exchange OnPremises)
+                    Write-Host
+                    Write-Host "Checking the following module: " -ForegroundColor Cyan -NoNewline
+                    Write-Host "$($Module.Name)" -ForegroundColor White
+                    $Prefix = $Module.Prefix
+
+                    if ($Prefix) {
+                        Write-Log ("[INFO] || The prefix used for this module (`"$($Module.Name)`") is: `"$Prefix`"") -NonInteractive $True
+                        Write-Host "`tThe prefix used for this module is: " -ForegroundColor Cyan -NoNewline
+                        Write-Host "$Prefix" -ForegroundColor White
+                    }
+                    else {
+                        Write-Log ("[INFO] || This module (`"$($Module.Name)`") doesn't have any prefix") -ForegroundColor Green
+                    }
+
+                    Write-Log ("[INFO] || Checking if this module (`"$($Module.Name)`") is related to Exchange Online, or Exchange On-Premises") -ForegroundColor Cyan
+
+                    ### Creating an Exchange Online specific command, to check later
+                    [string]$EXOCommand = "Get-" + $Prefix + "SyncRequest"
+                    ### Creating an Exchange OnPremises specific command, to check later
+                    [string]$OnPremCommand = "Get-" + $Prefix + "ExchangeServer"
+
+                    ### Checking if the module is Exchange Online related
+                    if ($($Module.ExportedCommands["$EXOCommand"])) {
+                        Write-Log ("[INFO] || This module (`"$($Module.Name)`") is related to Exchange Online") -ForegroundColor Green
+                        $void = $script:EXOModules.Add($Module)
+                    }
+                    ### Checking if the module is Exchange OnPremises related
+                    elseif ($($Module.ExportedCommands["$OnPremCommand"])) {
+                        Write-Log ("[INFO] || This module (`"$($Module.Name)`") is related to Exchange On-Premises") -ForegroundColor Green
+                        $void = $script:OnPremModules.Add($Module)
+                    }
+                    else {
+                        Write-Log ("[WARNING] || This module (`"$($Module.Name)`") is not related to Exchange Online, or Exchange OnPremises") -ForegroundColor Green
+                        $void = $script:NotUsefulModules.Add($Module)
+                    }
+                }
+            }
+
+            ### Throwing relevant errors
+            if ([int]$($script:EXOModules.Count) -eq 1) {
+                throw "In this Exchange Management Shell session, the script found also 1 module with Exchange Online related commands.`nIf the script has to run on the Exchange Online environment, please restart the script from a PowerShell window that is not already connected to Exchange Online.`nIf the script has to run on the Exchange OnPremises environment, please start a new Exchange Management Shell window, and start the script directly from it (using the -ConnectToExchangeOnPremises switch)."
+            }
+            elseif ([int]$($script:EXOModules.Count) -gt 1) {
+                throw "In this Exchange Management Shell session, the script found more than 1 module with Exchange Online related commands (found $($script:EXOModules.Count) modules).`nIf the script has to run on the Exchange Online environment, please restart the script from a PowerShell window that is not already connected to Exchange Online.`nIf the script has to run on the Exchange OnPremises environment, please start a new Exchange Management Shell window, and start the script directly from it (using the -ConnectToExchangeOnPremises switch)."
+            }
+            elseif ([int]$($script:OnPremModules.Count) -eq 1) {
+                throw "In this Exchange Management Shell session, the script found also 1 module with Exchange OnPremises related commands.`nIf the script has to run on the Exchange Online environment, please restart the script from a PowerShell window that is not already connected to Exchange Online.`nIf the script has to run on the Exchange OnPremises environment, please start a new Exchange Management Shell window, and start the script directly from it (using the -ConnectToExchangeOnPremises switch)."
+            }
+            elseif ([int]$($script:OnPremModules.Count) -gt 1) {
+                throw "In this Exchange Management Shell session, the script found more than 1 module with Exchange OnPremises related commands (found $($script:OnPremModules.Count) modules).`nIf the script has to run on the Exchange Online environment, please restart the script from a PowerShell window that is not already connected to Exchange Online.`nIf the script has to run on the Exchange OnPremises environment, please start a new Exchange Management Shell window, and start the script directly from it (using the -ConnectToExchangeOnPremises switch)."
+            }
+        }
+    }
+    ### This function returns if the script started in Exchange Management Shell ($true), or no ($false)
+    return $ExchangeManagementShell
+}
+
 
 #endregion Functions, Global variables
 
@@ -867,14 +1181,17 @@ try {
 
     Write-Host
     Write-Host "Details from the mailbox migration log:" -ForegroundColor Green
-
-    Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
-    Write-Host "$($TheMigrationLogs.MailboxIdentity.Name)" -ForegroundColor White
-    Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
-    Write-Host "$($TheMigrationLogs.Status.Value)" -ForegroundColor White
-    Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
-    Write-Host "$($TheMigrationLogs.StatusDetail.Value)" -ForegroundColor White
-
+    foreach ($Entry in $script:LogsToAnalyze) {
+        Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
+        Write-Host "$($Entry.MailboxIdentity.Name)" -ForegroundColor White
+        Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
+        Write-Host "$($Entry.Status.Value)" -ForegroundColor White
+        Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
+        Write-Host "$($Entry.StatusDetail.Value)" -ForegroundColor White
+        Write-Host "`tExchangeGuid: " -ForegroundColor Cyan -NoNewline
+        Write-Host "$($Entry.ExchangeGuid.Guid)" -ForegroundColor White
+        Write-Host
+    }
     #endregion ForTestPurposes
 
     #Show-Menu
