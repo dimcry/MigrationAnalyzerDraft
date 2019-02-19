@@ -135,8 +135,32 @@ Param(
     [string]$MigrationType,
 
     [Parameter(ParameterSetName = "ConnectToExchangeOnline", Mandatory = $false)]
+    [string]$EXOAdminAccount,
+
     [Parameter(ParameterSetName = "ConnectToExchangeOnPremises", Mandatory = $false)]
-    [string]$AdminAccount
+    [string]$OnPremAdminAccount,
+
+    [Parameter(Mandatory=$false,
+        ParameterSetName='ConnectToExchangeOnPremises')]
+    [ValidateNotNullOrEmpty()]
+    [ValidateScript({$_ -match "[htp]{4}"})] 
+    [string]$ExchangeURL,
+
+    [Parameter(Mandatory=$false,
+        ParameterSetName='ConnectToExchangeOnPremises')]
+    [ValidateNotNullOrEmpty()]
+    [ValidateSet("Basic","Digest","Negotiate","Kerberos")]
+    [string]$AuthenticationType,
+
+    [Parameter(Mandatory=$false,
+        ParameterSetName='ConnectToExchangeOnPremises')]
+    [ValidateNotNullOrEmpty()]
+    [string]$Domain = "getdomain",
+
+    [Parameter(Mandatory=$false,
+        ParameterSetName='ConnectToExchangeOnPremises')]
+    [ValidateNotNullOrEmpty()]
+    [string]$ADSite = "getsite"
 )
 
 #endregion Parameters
@@ -146,6 +170,18 @@ Param(
 ################################################
 #region Functions, Global variables
 
+### LogsToAnalyze (Scope: Script) variable will contain mailbox migration logs for all affected users
+[System.Collections.ArrayList]$script:LogsToAnalyze = @()
+### EXOCommandsPrefix (Scope: Script) variable will be used to create a new PSSession to Exchange Online.
+### When importing the PSSession, the script will use "MAEXO" (Migration Analyzer EXO) as Prefix for each command
+[string]$script:EXOCommandsPrefix = "MAEXO"
+### EXOPSSessionCreated (Scope: Script) variable will be used to check if the Exchange Online PSSession was successfully created
+[bool]$script:EXOPSSessionCreated = $false
+### ExOnPremCommandsPrefix (Scope: Script) variable will be used to create a new PSSession to Exchange OnPremises.
+### When importing the PSSession, the script will use "MAExOnP" (Migration Analyzer Exchange OnPremises) as Prefix for each command
+[string]$script:ExOnPremCommandsPrefix = "MAExOnP"
+### ExOnPremPSSessionCreated (Scope: Script) variable will be used to check if the Exchange OnPremises PSSession was successfully created
+[bool]$script:ExOnPremPSSessionCreated = $false
 
 ### <summary>
 ### Create-WorkingDirectory function will create the Working Directory (desired location "%temp%\MigrationAnalyzer\<MMddyyyy_HHmmss>").
@@ -162,7 +198,6 @@ function Create-WorkingDirectory {
         $NumberOfChecks
     )
     
-    Clear-Host
     Write-Host "We are creating the working folder with " -ForegroundColor Cyan -NoNewline
     Write-Host "`"<MMddyyyy_HHmmss>`"" -ForegroundColor White -NoNewline
     Write-Host " format, under " -ForegroundColor Cyan -NoNewline
@@ -288,6 +323,7 @@ Function Write-Log {
     
     ### In case NonInteractive is not True, write on display, too
     if (!($NonInteractive)){
+        Write-Host
         ( "[" + $date + "] || " + $string) | Write-Host -ForegroundColor $ForegroundColor
     }
 }
@@ -332,15 +368,99 @@ function Check-Parameters {
         Selected-FileOption -FilePath $FilePath
     }
     ### If ConnectToExchangeOnline parameter of the script was used, we will continue on this path.
-    elseif (ConnectToExchangeOnline) {
-        Selected-ConnectToExchangeOnlineOption -FilePath $FilePath
-        New-CleanO365Session 
+    elseif ($ConnectToExchangeOnline) {
+        Write-Log ("[INFO] || The script was started with the ConnectToExchangeOnline parameter: `"-ConnectToExchangeOnline:$true -AffectedUsers $AffectedUsers -MigrationType $MigrationType -TheAdminAccount $AdminAccount`"")
+        Selected-ConnectToExchangeOnlineOption -AffectedUser $AffectedUsers -MigrationType $MigrationType -TheAdminAccount $EXOAdminAccount
     }
     ### If ConnectToExchangeOnPremises parameter of the script was used, we will continue on this path.
-    elseif (ConnectToExchangeOnPremises) {
-        
+    elseif ($ConnectToExchangeOnPremises) {
+        Write-Log ("[INFO] || The script was started with the ConnectToExchangeOnPremises parameter.")
+        Selected-ConnectToExchangeOnPremisesOption -TheAffectedUsers $AffectedUsers
+    }
+    ### If the script was started without any parameters, we will provide a menu in order to continue
+    else {
+        Show-Menu
     }
 }
+
+
+### <summary>
+### Show-Header function is adding a header on the screen at the time the script starts
+### </summary>
+function Show-Header {
+
+    $menuprompt = $null
+
+    Clear-Host
+    $title = "=== Mailbox migration analyzer ==="
+    if (!($menuprompt)) 
+    {
+        $menuprompt+="="*$title.Length
+    }
+    Write-Host $menuprompt
+    Write-Host $title
+    Write-Host $menuprompt
+
+}
+
+### <summary>
+### Show-Menu function is used if the script is started without any parameters
+### </summary>
+### <param name="WorkingDirectory">WorkingDirectory parameter is used get the location on which the LogFile will be created.</param>
+function Show-Menu {
+
+    $menu=@"
+
+1 => If you have the migration logs in an .xml file
+2 => If you want to connect to Exchange Online in order to collect the logs
+3 => If you need to connect to Exchange On-Premises and collect the logs
+Q => Quit
+
+Select a task by number, or, Q to quit: 
+"@
+
+    Write-Log "[INFO] || Loading the menu..." -NonInteractive $true
+    $null = Show-Header
+
+    Write-Host $menu -ForegroundColor Cyan -NoNewline
+    $SwitchFromKeyboard = Read-Host
+
+    ### Providing a list of options
+    Switch ($SwitchFromKeyboard) {
+
+        ### If "1" is selected, the script will assume you have the mailbox migration logs in an .xml file
+        "1" {
+            Write-Log "[INFO] || You selected to provide an .xml to be analyzed."
+            Selected-FileOption
+        }
+
+        ### If "2" is selected, the script will connect you to Exchange Online
+        "2" {
+            Write-Log "[INFO] || You selected to connect to Exchange Online and collect from there correct migration logs to be analyzed."
+            Selected-ConnectToExchangeOnlineOption
+        }
+ 
+        ### If "3" is selected, you started the script from On-Premises Exchange Management Shell
+        "3" {
+            Write-Log "[INFO] || You selected to connect to Exchange On-Premises and collect from there correct migration logs to be analyzed."
+            Selected-ConnectToExchangeOnPremisesOption
+        }
+
+        ### If "Q" is selected, the script will exit
+        "Q" {
+            throw "You selected to quit the menu"
+         }
+ 
+        ### If you selected anything different than "1", "2", "3" or "Q", the Menu will reload
+        default {
+            Write-Log "[WARNING] || You selected an option that is not present in the menu (Value inserted from keyboard: `"$SwitchFromKeyboard`")" -ForegroundColor Yellow
+            Write-Log "[INFO] || Press any key to re-load the menu"
+            Read-Host
+            Show-Menu
+        }
+    } 
+}
+
 
 ### <summary>
 ### Selected-FileOption function is used when the information is already saved on a .xml file.
@@ -700,107 +820,145 @@ function Selected-ConnectToExchangeOnlineOption {
     )
 
     ### We will try to connect to Exchange Online
-    $ThePSSession = ConnectTo-ExchangeOnline -TheAdminAccount $TheAdminAccount
+    Test-EXOSession -TheAdminAccount $TheAdminAccount
 
-<#
-    [int]$TheNumberOfChecks = 1
-    [string]$ThePath = Ask-ForXMLPath -NumberOfChecks $TheNumberOfChecks
-
-    if ($ThePath -match "ValidationOfFileFailed") {
-        [int]$TheNumberOfChecks = 1
-        [string]$TheUser = Ask-ForDetailsAboutUser -NumberOfChecks $TheNumberOfChecks
-        [int]$TheNumberOfChecks = 1
-        [string]$TheMigrationType = Ask-DetailsAboutMigrationType -NumberOfChecks $TheNumberOfChecks -AffectedUser $TheUser
-        Select-Option2
-        #$ThePSSession = Connect-ToExchangeOnline #### Not done yet
-        #$TheMigrationLogs = Collect-MigrationLogs -UserName $TheUser -MigrationType $TheMigrationType #### Not done yet
-    }
-    else {
-        #$TheMigrationLogs = Collect-MigrationLogs  #### Not done yet
-    }
-#>  
 }
 
 ### <summary>
-### Selected-ConnectToExchangeOnlineOption function is used to connect to Exchange Online, and collect from there the mailbox migration logs,
-### for the affected user, by running the correct commands, based on the migration type
+### ConnectTo-ExchangeOnline function is used to connect to Exchange Online
 ### </summary>
 ### <param name="TheAdminAccount">TheAdminAccount represents username of an Admin that we will use in order to connect to Exchange Online </param>
+### <param name="NumberOfChecks">NumberOfChecks represents the number of times we try to connect to EXO, after which we will fail the script </param>
 Function ConnectTo-ExchangeOnline {
+    [CmdletBinding()]
+    param (
+        [string]
+        $TheAdminAccount,
+        [int]
+        $NumberOfChecks
+    )
+    
+    ### If we tried, without success, to connect to Exchange Online for more than 3 times we will fail the script
+    if ($NumberOfChecks -gt 3) {
+        throw "We were unable to connect to Exchange Online, after we tried for 3 times"
+    }
+
+    ### If we do not have the EXOCredential (Scope: Script) set, we are asking for the EXO Admin's credentials
+    ### The credentials will be dismissed just when the script will exit. During the time the script is still running, we will use the credentials in case
+    ### we have to reconnect to Exchange Online
+    $i = 0
+    while ((-not ($script:EXOCredential)) -and ($i -lt 5)){
+        $script:EXOCredential = Get-Credential $TheAdminAccount -Message "Please provide your Exchange Online Credentials:"
+    }
+
+    ### If we still don't have a credential object then abort
+    if (-not ($script:EXOCredential)) {
+        throw "Failed to get credentials for connecting to Exchange Online"
+    }
+
+    ### Destroy any outstanding EXO related PSSessions
+    Write-Log "[INFO] || Removing all Exchange Online related PSSessions"
+    if (-not($script:EXOPSSessionCreated)) {
+        $null = Get-PSSession | where {$_.ComputerName -like "outlook.office365.com"} | Remove-PSSession -Confirm:$false
+    }
+    else {
+        $null = Get-PSSession | where {$_.ComputerName -like "outlook.office365.com"} | where {$_.State -ne "Opened"} | Remove-PSSession -Confirm:$false
+    }
+    
+    ### Force Garbage collection just to try and keep things more agressively cleaned up due to some issue with large memory footprints
+    [System.GC]::Collect()
+    
+    ### Sleep 5s to allow the sessions to tear down fully
+    Write-Log "[INFO] || Sleeping 5 seconds for Session Tear Down"
+    Start-SleepWithProgress -SleepTime 5
+
+    ### Create the EXO session
+    Write-Log "[INFO] || Creating new Exchange Online PSSession"
+    
+    try {
+        $script:EXOsession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri "https://outlook.office365.com/powershell-liveid/" -Credential $EXOCredential -Authentication Basic -AllowRedirection -ErrorAction Stop
+        Write-Log "[INFO] || We managed to successfully create the Exchange Online PSSession"
+
+        ### Import the PSSession
+        try {
+            $null = Import-PSSession $script:EXOsession -AllowClobber -Prefix $script:EXOCommandsPrefix
+            $script:EXOPSSessionCreated = $true
+            Write-Log "[INFO] || We managed to successfully import the Exchange Online PSSession"
+        }
+        catch {
+            ### If error, retry
+            Write-Log "[ERROR] || We were unable to import the Exchange Online PSSession" -ForegroundColor Red
+            Write-log ("[ERROR] || $Error") -ForegroundColor Red
+            $script:EXOCredential = $null
+            $NumberOfChecks++
+            ConnectTo-ExchangeOnline -NumberOfChecks $NumberOfChecks
+        }
+    }
+    catch {
+        ### If error, retry
+        Write-Log "[ERROR] || We were unable to establish a connection to Exchange Online" -ForegroundColor Red
+        Write-log ("[ERROR] || $Error") -ForegroundColor Red
+        $script:EXOCredential = $null
+        $NumberOfChecks++
+        ConnectTo-ExchangeOnline -NumberOfChecks $NumberOfChecks
+    }
+}
+
+
+### <summary>
+### Start-SleepWithProgress function is used to sleep X seconds and display a progress bar
+### </summary>
+### <param name="sleeptime">sleeptime represents the number of seconds for which the script will sleep </param>
+Function Start-SleepWithProgress {
+    Param(
+        [int]
+        $sleeptime
+    )
+
+	### Loop Number of seconds you want to sleep
+	For ($i=0;$i -le $sleeptime;$i++){
+		$timeleft = ($sleeptime - $i);
+		
+		### Progress bar showing progress of the sleep
+		Write-Progress -Activity "Sleeping" -CurrentOperation "$Timeleft More Seconds" -PercentComplete (($i/$sleeptime)*100);
+		
+		### Sleep 1 second
+		start-sleep 1
+	}
+	
+	Write-Progress -Completed -Activity "Sleeping"
+}
+
+### <summary>
+### Test-EXOSession function is used to test if we have an Open PSSession to Exchange Online
+### </summary>
+### <param name="TheAdminAccount">TheAdminAccount represents username of an Admin that we will use in order to connect to Exchange Online </param>
+Function Test-EXOSession {
     [CmdletBinding()]
     param (
         [string]
         $TheAdminAccount
     )
-    
-    if ($TheAdminAccount) {
-        $script:Credential = Get-Credential -UserName $TheAdminAccount -Message "Please provide credentials to connect to Exchange Online:"
-    }
 
-    # If we don't have a credential then prompt for it
-    $i = 0
-    while (($script:Credential -eq $Null) -and ($i -lt 5)){
-        $script:Credential = Get-Credential -Message "Please provide your Exchange Online Credentials"
-        $i++
+	### Reset and regather our session information
+    $SessionInfo = $null
+    if ($script:EXOPSSessionCreated) {
+        SessionInfo = Get-PSSession | where {($_.ComputerName -like "outlook.office365.com") -and ($_.State -eq "Opened")}
     }
-    
-    # If we still don't have a credentail object then abort
-    if ($Credential -eq $null){
-        Write-Log "[ERROR] || Failed to get credentials" -ForegroundColor Red
+	
+	### Make sure we found a session
+	if (-not ($SessionInfo)) { 
+		Write-Log "[ERROR] || No Exchange Online related PSSession was found" -ForegroundColor Red
+		Write-log "[INFO] || Recreating the session"
+		ConnectTo-ExchangeOnline -TheAdminAccount $TheAdminAccount -NumberOfChecks 1
+	}	
+	### Make sure it is in an opened state if not log and recreate
+	elseif ($SessionInfo.State -ne "Opened") {
+		Write-Log "[ERROR] || The Exchange Online related PSSession is not in Open state" -ForegroundColor Red
+		Write-log ($SessionInfo | fl | Out-String ) -ForegroundColor Red
+		Write-log "[INFO] || Recreating the Exchange Online Session"
+		ConnectTo-ExchangeOnline -TheAdminAccount $TheAdminAccount -NumberOfChecks 1
     }
-
-    Write-Log "[INFO] || Removing all PS Sessions"
-
-    # Destroy any outstanding PS Session
-    Get-PSSession | Remove-PSSession -Confirm:$false
-    
-    # Force Garbage collection just to try and keep things more agressively cleaned up due to some issue with large memory footprints
-    [System.GC]::Collect()
-    
-    # Sleep 15s to allow the sessions to tear down fully
-    Write-Log "[INFO] || Sleeping 15 seconds for Session Tear Down"
-    Start-SleepWithProgress -SleepTime 15
-
-    # Clear out all errors
-    $Error.Clear()
-    
-    # Create the session
-    Write-Log "[INFO] || Creating new PS Session"
-    
-    $session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri "https://outlook.office365.com/powershell-liveid/" -Credential $Credential -Authentication Basic -AllowRedirection
-        
-    # Check for an error while creating the session
-    if ($Error.Count -gt 0){
-    
-        Write-Log "[ERROR] || Error while setting up session" -ForegroundColor Red
-        Write-log ("[ERROR] || $Error") -ForegroundColor Red
-        
-        # Increment our error count so we abort after so many attempts to set up the session
-        $ErrorCount++
-        
-        # if we have failed to setup the session > 3 times then we need to abort because we are in a failure state
-        if ($ErrorCount -gt 3) {
-            throw "Failed to setup session after multiple tries"
-        }
-        
-        # If we are not aborting then sleep 60s in the hope that the issue is transient
-        Write-Log "[INFO] || Sleeping 60s so that issue can potentially be resolved"
-        Start-SleepWithProgress -sleeptime 60
-        
-        # Attempt to set up the sesion again
-        New-CleanO365Session
-    }
-    
-    # If the session setup worked then we need to set $errorcount to 0
-    else {
-        $ErrorCount = 0
-    }
-    
-    # Import the PS session
-    $null = Import-PSSession $session -AllowClobber -Prefix EXO
-    
-    # Set the Start time for the current session
-    Set-Variable -Scope script -Name SessionStartTime -Value (Get-Date)
 }
 
 ### <summary>
@@ -833,22 +991,760 @@ function Collect-MigrationLogs {
         [string]$MigrationType,
     
         [Parameter(ParameterSetName = "ConnectToExchangeOnline", Mandatory = $false)]
-        [Parameter(ParameterSetName = "ConnectToExchangeOnPremises", Mandatory = $false)]
         [string]$AdminAccount
     )
     
     if ($XMLFile) {
-        ### Importing data in the MigrationLogsToAnalyze (Scope: Script) variable
-        Write-Log ("[INFO] || Importing data from `"$XMLFile`" file, in the MigrationLogsToAnalyze variable" )
-        $script:TheMigrationLogs = Import-Clixml $XMLFile
+        ### Importing data in the LogsToAnalyze (Scope: Script) variable
+        Write-Log ("[INFO] || Importing data from `"$XMLFile`" file, in the LogsToAnalyze variable")
+        $TheMigrationLogs = Import-Clixml $XMLFile
+        foreach ($Log in $TheMigrationLogs) {
+            $void = $script:LogsToAnalyze.Add($Log)
+        }
     }
     elseif ($ConnectToExchangeOnline) {
+        ### Connecting to Exchange Online in order to collect the needed/correct mailbox migration logs
         Write-Host "This part is not yet implemented" -ForegroundColor Red
     }
     elseif ($ConnectToExchangeOnPremises) {
-        Write-Host "This part is not yet implemented" -ForegroundColor Red
+        ### Connecting to Exchange On-Premises in order to collect the outputs of relevant MoveHistory from Get-MailboxStatistics
+        Write-Log ("[INFO] || Collecting MoveHistory from Get-MailboxStatistics for each Affected users")
+        Collect-MailboxStatistics -AffectedUsers $AffectedUsers -TheEnvironment 'Exchange OnPremises'
     }
 }
+
+
+function Collect-MailboxStatistics {
+    param (
+        [string[]]
+        $AffectedUsers,
+        [ValidateSet("Exchange Online", "Exchange OnPremises")]
+        [string]
+        $TheEnvironment
+    )
+
+    if ($TheEnvironment -eq "Exchange Online") {
+        [string]$TheCommand = "(Get-"+ $script:EXOCommandsPrefix + "MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory -ErrorAction Stop).MoveHistory | where {[string]`$(`$_.WorkloadType.Value) -eq `"Onboarding`"} | select -First 1"
+    }
+    else {
+        [string]$TheCommand = "(Get-MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory -ErrorAction Stop).MoveHistory | where {[string]`$(`$_.WorkloadType) -eq `"Offboarding`"} | select -First 1"
+    }
+
+    foreach ($User in $AffectedUsers) {
+        try {
+            Write-Log ("[INFO] || Running the following command:`n`t$TheCommand")
+            $MailboxStatistics = Invoke-Expression $TheCommand
+            Write-Log "[INFO] || MoveHistory successfully collected for `"$User`" user."
+            $void = $script:LogsToAnalyze.Add($MailboxStatistics)
+        }
+        catch {
+            Write-Log "[ERROR] || We were unable to collect MoveHistory from MailboxStatistics for `"$User`" user."
+        }
+    }
+}
+
+
+### <summary>
+### Selected-ConnectToExchangeOnPremisesOption function is used to collect mailbox migration logs from Exchange On-Premises (MoveHistory from Get-MailboxStatistics)
+### If this option will be selected, the script have to be started from the On-Premises Exchange Management Shell
+### </summary>
+### <param name="AffectedUser">AffectedUser represents the affected user for which we collect the mailbox migration logs </param>
+function Selected-ConnectToExchangeOnPremisesOption {
+    [CmdletBinding()]
+    Param (
+        [string[]]
+        $TheAffectedUsers
+    )
+
+    $script:OnPremisesPSSession = ConnectTo-ExchangeOnPremises -Prefix $script:ExOnPremCommandsPrefix -ExchangeURL $ExchangeURL -AuthenticationType $AuthenticationType -Domain $Domain -ADSite $ADSite -NumberOfChecks 1
+}
+
+### <summary>
+### ConnectTo-ExchangeOnPremises function is used to collect mailbox migration logs from Exchange On-Premises (MoveHistory from Get-MailboxStatistics)
+### If this option will be selected, the script have to be started from the On-Premises Exchange Management Shell
+### </summary>
+### <param name="AffectedUser">AffectedUser represents the affected user for which we collect the mailbox migration logs </param>
+function ConnectTo-ExchangeOnPremises {
+
+    [CmdletBinding(DefaultParameterSetName='resolve',
+                   HelpUri = 'https://gallery.technet.microsoft.com/Connect-to-one-or-multiple-b850411d'
+    )]
+
+    Param(
+
+    [Parameter(Mandatory=$false)]
+    #[ValidateNotNullOrEmpty()]
+    #[ValidateScript({$_ -match "[htp]{4}"})] 
+    [string]$ExchangeURL,
+
+    [Parameter(Mandatory=$false)]
+    #[ValidateNotNullOrEmpty()]
+    #[ValidateSet("Basic","Digest","Negotiate","Kerberos")]
+    [string]$AuthenticationType,
+
+    [Parameter(Mandatory=$false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Domain = "getdomain",
+
+    [Parameter(Mandatory=$false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ADSite = "getsite",
+
+    [Parameter(Mandatory=$false)]
+    [ValidateNotNullOrEmpty()]
+    [String]$Prefix,
+
+    [Parameter(Mandatory = $false)]
+    [string]$OnPremAdminAccount,
+
+    [int]
+    $NumberOfChecks
+
+    )
+
+    <#
+    #region Determine the exchange version
+
+    switch ($version)
+    {
+        "notdeclared" {$versionnr = "notdeclared"}
+        "2007"        {$versionnr = " 8 "}
+        "2010"        {$versionnr = " 14."}
+        "2013"        {$versionnr = " 15.0 "}
+        "2016"        {$versionnr = " 15.1 "}
+        "2019"        {$versionnr = " 15.2 "}
+    }
+
+    Write-Log ("[INFO] || Function is set to use exchange version: $versionnr")
+
+    #endregion Determine the exchange version
+#>
+
+    #region Determine if a url is being specified
+
+    if (([string]::IsNullOrEmpty($ExchangeURL))) {
+        Write-Log "[INFO] || Function is set to use exchange URL: Auto-resolve"
+        [bool]$autoresolveurl = $true
+    }
+    else {
+        Write-Log ("[INFO] || Function is set to use exchange URL: $exchangeurl")
+        [bool]$autoresolveurl = $false
+    }
+
+    #endregion Determine if a url is being specified
+
+    
+    if ($autoresolveurl) {
+        #region Start auto resolve connection url
+        #region Determine AD domain 
+
+        if ($Domain -eq "getdomain") {
+            try {
+                Write-Log "[INFO] || Function will now query AD domain using .net"
+                $Domain = ([system.directoryservices.activedirectory.domain]::GetCurrentDomain()).name
+            }
+            catch {
+                Write-Log ("$($_.exception.message)")
+                throw "[ERROR] || Function Could not resolve Active directory domain and -Domain switch is not used."
+            }
+        }
+
+        #endregion Determine AD domain
+        #region Determine AD site 
+
+        if ($ADsite -eq "getsite") {
+            $sitemanualset = $false
+            try {
+                Write-Log "[INFO] || Function will now query current computer AD site using .net"
+                $ADsitename = ([System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite()).name
+            }
+            catch {
+                Write-Log ("$($_.exception.message)")
+                Write-Log "[WARNING] || Could not resolve the client AD site. The Function will continue autoresolve using any AD site as filter. You might end up on a slow AD site. Please validate your IP to AD site binding settings" -ForegroundColor Yellow
+                $ADsitename = "*"                
+            }
+        }
+        else {
+            $ADsitename = $ADsite
+            $sitemanualset = $true
+        }
+
+        Write-Log  ("[INFO] || Function is set to use ADsite: $ADsitename")
+
+        #endregion Determine AD site
+        #region Build exchange search filter
+        #region craft exchange site filter
+
+        $FilterADSite = "(&(objectclass=site)(Name=$ADsitename))"
+        $ADsiteobject = Get-Ldapobject -LDAPfilter $FilterADSite -configurationNamingContext -configurationNamingContextdomain $domain
+        $ADsiteobjectdn = $ADsiteobject.properties.distinguishedname
+        
+        if ([string]::IsNullOrEmpty($ADsiteobjectdn)) {
+            Write-Log ("[ERROR] || Failing AD query: $FilterADSite") -ForegroundColor Red
+            throw "Could not find the AD site. Please check you spelling if you used -ADsite parameter. If autoresolve is used a connectivity error occured"
+        }
+
+        #endregion craft exchange site filter     
+
+        $Filterexservers = "(&(serverrole=*)(objectclass=msExchExchangeServer)(msExchServerSite=$ADsiteobjectdn)(serialnumber=*))"
+ 
+        #endregion Build exchange search filter
+        #region Harvest exchange servers
+        [Array]$Servers =@()
+        $tempallServers = Get-Ldapobject -LDAPfilter $Filterexservers -configurationNamingContext -configurationNamingContextdomain $domain -Findall $true
+        [Array]$Servers += $tempallServers
+
+        if ($Servers.count -eq 0) {       
+            Write-Log ("[WARNING] || Function did resolve 0 servers in the ADsite $adsit using filter: $Filterexservers ") -ForegroundColor Yellow
+            Write-Log "[INFO] || Retrying with next closest AD sites"
+            $AdjacentSites = ([System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite()).AdjacentSites.name
+            Write-Log ("[INFO] || Found ajecentsites AD sites: $($AdjacentSites -join ", ") ")
+
+            foreach ($site in $AdjacentSites) {
+                Write-Log "[INFO] || Function trying to find servers in AD sites: $site "
+
+                #clean iterative variables
+                              
+                $FilterADSite = $null
+                $ADsiteobject = $null
+                $ADsiteobjectdn = $null
+                $Filterexservers = $null
+                $tempallServers = $null
+                $selectedsiteServers = $null
+
+                #region retry Build exchange search filter
+                
+                #region craft exchange site filter retry
+
+                $FilterADSite = "(&(objectclass=site)(Name=$site))"
+                $ADsiteobject = Get-Ldapobject -LDAPfilter $FilterADSite -configurationNamingContext -configurationNamingContextdomain $domain
+                $ADsiteobjectdn = ($ADsiteobject).properties.distinguishedname
+        
+                if ([string]::IsNullOrEmpty($ADsiteobjectdn)) {
+                    write-verbose -Message "failing AD query: $FilterADSite"
+                    throw "Error - Could not find the AD site. Please check you spelling if you used -ADsite parameter. If autoresolve is used a connectivity error occured"
+                    break    
+                }
+
+                #endregion craft exchange site filter retry
+
+                if ($versionnr -eq "notdeclared") {
+                    $Filterexservers = "(&(serverrole=*)(objectclass=msExchExchangeServer)(msExchServerSite=$ADsiteobjectdn)(serialnumber=*))"
+                }
+                else {
+                    $Filterexservers = "(&(serverrole=*)(objectclass=msExchExchangeServer)(msExchServerSite=$ADsiteobjectdn)(serialnumber=*$versionnr*))"
+                }
+                
+                #endregion retry Build exchange search filter
+
+                #region Retry Harvest exchange servers
+                
+                $tempallServers = Get-Ldapobject -LDAPfilter $Filterexservers -configurationNamingContext -configurationNamingContextdomain $domain -Findall $true
+                $selectedsiteServers = $tempallServers.properties.name -join ", "
+                if ($tempallServers.count -ge 1) {
+                    Write-Log ("[INFO] || Function found new servers in site $site. Adding servers: $($selectedsiteServers -join ", ")")
+                    $Servers += $tempallServers
+                }
+                #endregion Retry Harvest exchange servers
+            }
+        }
+
+        #region Final attempt Harvest exchange servers
+
+        if ($Servers.count -eq 0) {
+            Write-Log ("[INFO] || Function did resolve 0 servers in adjacent sites to ADsite $adsitename using filter: $Filterexservers ")
+            Write-Log "Function last attempt: Any site , any version"
+            $Filterexservers = "(&(serverrole=*)(objectclass=msExchExchangeServer))"
+            [Array]$Servers +=  Get-Ldapobject -LDAPfilter $Filterexservers -configurationNamingContext -configurationNamingContextdomain $domain -Findall $true
+        }
+
+        if ($Servers.count -eq 0) {
+            throw "Function was unable to identify any Exchange servers in your organization"
+        }
+        else {
+            [System.Collections.ArrayList]$E19Servers = @()
+            [System.Collections.ArrayList]$E16Servers = @()
+            [System.Collections.ArrayList]$E15Servers = @()
+            [System.Collections.ArrayList]$E14Servers = @()
+            [System.Collections.ArrayList]$OtherVersionServers = @()
+            foreach ($Server in $Servers) {
+                if ($($Server.Properties["serialnumber"]) -like "*Version 15.2*") {
+                    $null = $E19Servers.Add($Server)
+                }
+                elseif ($($Server.Properties["serialnumber"]) -like "*Version 15.1*") {
+                    $null = $E16Servers.Add($Server)
+                }
+                elseif ($($Server.Properties["serialnumber"]) -like "*Version 15.0*") {
+                    $null = $E15Servers.Add($Server)
+                }
+                elseif ($($Server.Properties["serialnumber"]) -like "*Version 14.*") {
+                    $null = $E14Servers.Add($Server)
+                }
+                else {
+                    $null = $OtherVersionServers.Add($Server)
+                }
+            }
+        }
+
+        [Array]$Servers = @()
+        if ($E19Servers) {
+            foreach ($Server in $E19Servers) {
+                $Servers += $Server
+            }
+        }
+        elseif ($E16Servers) {
+            foreach ($Server in $E16Servers) {
+                $Servers += $Server
+            }
+        }
+        elseif ($E15Servers) {
+            foreach ($Server in $E15Servers) {
+                $Servers += $Server
+            }
+        }
+        elseif ($E14Servers) {
+            foreach ($Server in $E14Servers) {
+                $Servers += $Server
+            }
+        }
+        elseif ($OtherVersionServers) {
+            throw "In your Organization we were unable to identify any supported versions of Exchange server (2019 / 2016 / 2013 / 2010).`nWe identified $($OtherVersionServers.Count) servers with a version older than 2010.`nIf you have, a supported version of Exchange, please restart the script with the `"-ConnectToExchangeOnPremises -ExchangeURL http://mail.contoso.com/PowerShell`" parameters, and correct values."
+        }
+        else {
+            throw "In your Organization we were unable to identify any Exchange server.`nIf you have, a supported version of Exchange server (2019 / 2016 / 2013 / 2010), please restart the script at least with the `"-ConnectToExchangeOnPremises -ExchangeURL http://mail.contoso.com/PowerShell`" parameters, and correct values."
+        }
+
+
+        #endregion Final attempt Harvest exchange servers
+
+
+
+        Write-Log ("[INFO] || Function found the following exchange servers to try to connect to: $($Servers.properties.name -join ", ")")
+    }
+    
+    do {
+        try {
+            if (!($exchangeurl)) { 
+                if (!([string]::IsNullOrWhiteSpace($Servers))) {
+                    Write-Verbose -Message "The following servers have been found $($servers.properties.name)" 
+                    $server = get-random $servers
+                }
+                else {
+                    write-output -InputObject "There are 0 exchange servers of version $version $tempversion in the site $adsite"
+                    throw
+                }
+                $ip = ($server.properties.networkaddress | ?{$_ -like "ncacn_ip_tcp*" }).split(":")[1]
+                $serverconnection = "http://$ip/powershell"
+            }
+            else {
+                $serverconnection = $exchangeurl
+            }
+
+            $i = 0
+            while ((-not ($script:ExOnPremCredential)) -and ($i -lt 5)){
+                $script:ExOnPremCredential = Get-Credential $OnPremAdminAccount -Message "Please provide your Exchange OnPremises Credentials:"
+            }
+
+            if ([string]::IsNullOrWhiteSpace($OnPremAdminAccount)) {
+                try {
+                    $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -ErrorAction Stop
+                }
+                catch {
+                    Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises without explicit credentials"
+                }
+            }
+
+            #if ($script:ExOnPremCredential) {
+                if ([string]::IsNullOrWhiteSpace($authenticationtype)) {
+                    try {
+                        $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -Credential $script:ExOnPremCredential -ErrorAction Stop
+                    }
+                    catch {
+                        Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName))"
+                        try {
+                            $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -Credential $script:ExOnPremCredential -Authentication Basic -ErrorAction Stop
+                        }
+                        catch {
+                            Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName)), using the provided authentication type ($authenticationtype)"
+                        }
+                    }
+                }
+                else {
+                    try {
+                        $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -Credential $script:ExOnPremCredential -Authentication $authenticationtype -ErrorAction Stop
+                    }
+                    catch {
+                        Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName)), using the provided authentication type ($authenticationtype)"
+                    }
+                }
+            #}
+
+            try {
+                $null = Import-PSSession $script:ExOnPremPSSession -AllowClobber -Prefix $script:ExOnPremCommandsPrefix
+                $script:ExOnPremPSSessionCreated = $true
+                Write-Log "[INFO] || We managed to successfully import the Exchange OnPremises PSSession"
+            }
+            catch {
+                ### If error, retry
+                Write-Log "[ERROR] || We were unable to import the Exchange OnPremises PSSession" -ForegroundColor Red
+                Write-log ("[ERROR] || $Error") -ForegroundColor Red
+                $script:ExOnPremCredential = $null
+                $NumberOfChecks++
+                ConnectTo-ExchangeOnPremises -Prefix $script:ExOnPremCommandsPrefix -ExchangeURL $ExchangeURL -AuthenticationType $AuthenticationType -Domain $Domain -ADSite $ADSite -NumberOfChecks 1
+            }
+
+            write-Log ("[INFO] || Connected and imported session from server: $serverconnection")
+
+        }
+        catch [System.Management.Automation.Remoting.PSRemotingTransportException] {
+            write-output (" tried connecting to $serverconnection but could not connect ")    
+            if ($_.exception.message -like "*Access is denied*" -or $_.exception.message -like "*Access denied*")
+            {
+                Write-Log "[ERROR] || Access is denied. invalid or no credentials. Provide credentials" -ForegroundColor Red
+            }
+
+            $connectionerrorcount ++
+            if ( $connectionerrorcount -ge 2 )
+            {
+                $script:ExOnPremPSSession = "failed"
+                Write-Log "$($_.exception.message)"
+                Write-Log ("[ERROR] || Tried connecting 2 times but could not connect due to invalid credentials. last exchange server we tried : $serverconnection") -ForegroundColor Red
+            }
+        }
+        catch {
+            $connectionerrorcount ++
+            if ( $_.exception.Message -like "No command proxies have been created*") {
+                Write-Log "$($_.exception.message)" -ForegroundColor Red
+                Write-Log "[INFO] || No command proxies have been created, because all of the requested remote commands would shadow existing local commands."
+                Write-Log ("[INFO] || Connected and imported new commands from server: $serverconnection")
+
+            }
+            elseif ( $_.exception.Message -like "*The attribute cannot be added because variable*") {
+                #Catch Powershell Bug object validation: http://stackoverflow.com/questions/19775779/powershell-getnewclosure-and-cmdlets-with-validation
+                Write-Log ("[ERROR] || Powershell Bug object validation plz ignore bug raport is created at microsoft: $($_.exception.message)")
+            }
+            else {
+                Write-Log ("$($_.exception.message)") -ForegroundColor Red
+                Write-Log ("[ERROR] || Tried connecting to $serverconnection but could not connect " + $_.exception.Message)  -ForegroundColor Red
+            }
+            if ( $connectionerrorcount -ge 5 ) {
+                $script:ExOnPremPSSession = "failed"
+                Write-Log ("$($_.exception.message)") -ForegroundColor Red
+                Write-Log ("[INFO] || tried connecting 5 times but could not connect. last exchange server we tried : $serverconnection")     
+            }
+        }
+        finally
+        {
+            if ( $ADsite -is [System.IDisposable]){ 
+                $ADsite.Dispose()
+            }
+            if ( $domain -is [System.IDisposable]) { 
+                $domain.Dispose()
+            }
+        }
+    }
+    until ($script:ExOnPremPSSession)
+} 
+
+
+function Get-Ldapobject {
+    <#
+    .SYNOPSIS
+        Search LDAP directorys using .NET LDAP searcher. The function supports query`s from any pc no matter if it is joined to the domain.
+        The function has support for all  partition types and multi domain / forest setups.
+    .DESCRIPTION
+        Search AD configuration or naming partition or using .NET AD searcher 
+    .EXAMPLE
+        Get-Ldapobject -LDAPfilter "(&(name=henk*)(diplayname=*))"
+
+        Search the current domain with the LDAP filter "(&(name=Henk*)(diplayname=*))". Return all properties.
+        Return only 1 result
+    .EXAMPLE
+        Get-Ldapobject -LDAPfilter "(&(name=henk*)(diplayname=*))" -properties Displayname,samaccountname -Findall $true
+
+        Search the current domain with the LDAP filter "(&(name=henk*)(diplayname=*))". Return Displayname and samaccountname.
+        Return all result 
+    .EXAMPLE
+        Get-Ldapobject -OU "OU=users,DC=contoso,DC=com" -DC "DC01" -LDAPfilter "(&(name=henk*)(diplayname=*))" -properties samaccountname
+
+        Search the OU "users" in the domain "contoso.com" using DC01 and the LDAP filter "(&(name=henk*)(diplayname=*))". Return the
+        samaccountname. Return only 1 result
+    .EXAMPLE
+        Get-Ldapobject -OU "CN=Microsoft Exchange,CN=Services,CN=Configuration,DC=tailspin,DC=com" -LDAPfilter 
+        "(&(objectclass=msExchExchangeServer)(serialnumber=*15*))" -Findall $true -$configurationNamingContext
+
+        Search the current AD domain for all exchange 2013 and 2016 servers in the configuration partition of AD.
+        Return all result 
+    .EXAMPLE
+        Get-Ldapobject -OU "CN=Microsoft Exchange,CN=Services,CN=Configuration,DC=tailspin,DC=com" -LDAPfilter 
+        "(objectclass=msExchExchangeServer)" -Findall $true -ConfigurationNamingContext -ConfigurationNamingContextdomain "tailspin.com"
+
+        Search the Remote AD domain "tailspin.com" for all exchange servers in the configuration partition of AD.
+        Return all result
+    .NOTES
+        -----------------------------------------------------------------------------------------------------------------------------------
+        Function name : Get-Ldapobject
+        Authors       : Martijn van Geffen
+        Version       : 1.2
+        dependancies  : None
+        -----------------------------------------------------------------------------------------------------------------------------------
+        -----------------------------------------------------------------------------------------------------------------------------------
+        Version Changes:
+        Date: (dd-MM-YYYY)    Version:     Changed By:           Info:
+Â Â       12-12-2016            V1.0         Martijn van Geffen    Initial Script.
+        06-01-2017            V1.1         Martijn van Geffen    Released on Technet
+        26-02-2018            V1.2         Martijn van Geffen    Set the default OU to the forest root to better support multi domain
+                                                                 and multi forest
+        -----------------------------------------------------------------------------------------------------------------------------------
+    .COMPONENT
+        None
+    .ROLE
+        None
+    .FUNCTIONALITY
+        Search LDAP directorys using .NET LDAP searcher
+    #>
+
+    [CmdletBinding(HelpUri='https://gallery.technet.microsoft.com/scriptcenter/Search-AD-LDAP-from-domain-c0131588')]
+    [Alias("glo")]
+    [OutputType([System.Array])]
+
+    param(
+
+    [Parameter(Mandatory=$false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$OU,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$DC,
+    
+    [Parameter(Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$LDAPfilter,
+
+    [Parameter(Mandatory=$false)]
+    [array]$Properties = "*",
+
+    [Parameter(Mandatory=$false)]
+    [bool]$Findall = $false,
+        
+    [Parameter(Mandatory=$false)]
+    [string]$Searchscope = "Subtree",
+
+    [Parameter(Mandatory=$false)]
+    [int32]$PageSize = "900",
+
+    [Parameter(Mandatory=$false)]
+    [switch]$ConfigurationNamingContext,
+
+    [Parameter(Mandatory=$false)]
+    [string]$ConfigurationNamingContextdomain,
+
+    [Parameter(Mandatory=$false)]
+    [System.Management.Automation.PsCredential]$Cred   
+
+    )
+    
+    If ( $cred )
+    {
+        $username = $Cred.username
+        $password = $Cred.GetNetworkCredential().password
+    }
+
+    if ( !$DC )
+    {
+        try 
+        {
+            $DC = ([system.directoryservices.activedirectory.domain]::GetCurrentDomain()).name
+            write-verbose -message "Current "
+        }
+        catch
+        {
+            Write-error "Variable DC can not be empty if you run this from a non domain joined computer. Use a DC or Use Get-dc function here from https://gallery.technet.microsoft.com/scriptcenter/Find-a-working-domain-fe731b4f"
+        }
+    }
+
+    if ( !$OU )
+    {
+        try 
+        {
+            $OU = "DC=" + ([string]([system.directoryservices.activedirectory.domain]::GetCurrentDomain()).forest).Replace(".",",DC=")
+        }
+        catch
+        {
+            Write-error "Variable OU can not be empty if you run this from a non domain joined computer. Use a DC or Use Get-dc function here from https://gallery.technet.microsoft.com/scriptcenter/Find-a-working-domain-fe731b4f"
+        }
+    }
+
+    Try
+    {
+        if ( $cred )
+        {
+            $root = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$DC/$OU",$username,$password)
+        }else
+        {
+            $root = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$DC/$OU")
+        } 
+        
+        if ( $configurationNamingContext.IsPresent )
+        {
+        
+            try
+            {
+                if (!$ConfigurationNamingContextdomain)
+                {
+                    $ConfigurationNamingContextdomain = [system.directoryservices.activedirectory.domain]::GetCurrentDomain()
+                }
+                $tempconfigurationNamingContextdomain = $configurationNamingContextdomain
+            }
+            catch
+            {
+                Write-error "Variable ConfigurationNamingContextdomain can not be empty if you run this from a not domain joined computer"
+            }
+
+            try
+            {
+                do
+                {
+                    if ( $cred )
+                    {
+                        $tempdomain = new-object System.DirectoryServices.ActiveDirectory.DirectoryContext("domain",$tempconfigurationNamingContextdomain,$username,$password)
+                    }else
+                    {
+                        $tempdomain = new-object System.DirectoryServices.ActiveDirectory.DirectoryContext("domain",$tempconfigurationNamingContextdomain)
+                    }
+                    $domain = [system.directoryservices.activedirectory.domain]::GetDomain($tempdomain)
+                    $configurationNamingContextdomain = $domain.forest.name
+                    $tempconfigurationNamingContextdomain = $domain.parent
+                }while ( $domain.parent )
+
+                $configurationdn = "CN=configuration,DC=" + $configurationNamingContextdomain.Replace(".",",DC=")
+                if ( $cred )
+                {
+                    $root = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$DC/$configurationdn",$username,$password)
+                }else
+                {
+                    $root = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$DC/$configurationdn")
+                }
+                      
+            }
+            Finally
+            {
+                if (  $domain -is [System.IDisposable])
+                { 
+                     $domain.Dispose()
+                }
+                if ( $configurationNamingContextdomain -is [System.IDisposable])
+                { 
+                     $configurationNamingContextdomain.Dispose()
+                }
+            }
+        
+        }
+                   
+        $searcher = new-object DirectoryServices.DirectorySearcher($root)
+        $searcher.filter = $LDAPfilter
+        $searcher.PageSize = $PageSize
+        $searcher.searchscope = $searchscope
+        $searcher.PropertiesToLoad.addrange($properties)
+
+        if ($findall)
+        {
+            [System.Array]$object = $searcher.Findall()
+        }
+    
+        if (!$findall)
+        {
+            [System.Array]$object = $searcher.Findone()
+        }
+
+    }
+    Finally
+    {        
+        if ( $searcher -is [System.IDisposable])
+        { 
+            $searcher.Dispose()
+        }
+        if ( $OU -is [System.IDisposable])
+        { 
+            $OU.Dispose()
+        }
+        if ( $DC -is [System.IDisposable])
+        { 
+            $DC.Dispose()
+        }
+    }
+    return $object
+}
+
+### <summary>
+### Extract-CorrectListOfUsersForMailboxStatistics function is used to check if the list of affected users can be used in order to collect MailboxStatistics output
+### </summary>
+### <param name="TheAffectedUsers">TheAffectedUsers represent the list of affected users for which we do the check </param>
+### <param name="TheEnvironment">TheEnvironment informs us about the environment in which we want to run the Get-MailboxStatistics command </param>
+function Extract-CorrectListOfUsersForMailboxStatistics {
+    param (
+        [string[]]
+        $TheAffectedUsers,
+        [ValidateSet("Exchange Online", "Exchange OnPremises")]
+        [string]$TheEnvironment
+    )
+
+    [System.Collections.ArrayList]$UsersOK = @()
+    [System.Collections.ArrayList]$UsersNotOK = @()
+    ### For each user, checking if they are UserMailbox as RecipientType in the mentioned environment
+    foreach ($User in $TheAffectedUsers) {
+        Write-Log ("[INFO] || Verifying if the $User user is an UserMailbox in $TheEnvironment")
+        try {
+            if ($TheEnvironment -eq "Exchange Online") {
+                [string]$TheCommand = "Get-"+ $script:EXOCommandsPrefix + "Recipient `$User -ResultSize Unlimited -ErrorAction Stop"
+            }
+            else {
+                [string]$TheCommand = "Get-Recipient `$User -ResultSize Unlimited -ErrorAction Stop"
+            }
+            $GetRecipient = Invoke-Expression $TheCommand
+            Write-Log ("[INFO] || $User user is an UserMailbox in $TheEnvironment")
+            Write-Log ("[INFO] || Details about the user:`n`tUserPrincipalName: $($GetUser.UserPrincipalName)`n`tSamAccountName: $($GetUser.SamAccountName)`n`tOrganizationalUnit: $($GetUser.OrganizationalUnit)`n`tDistinguishedName: $($GetUser.DistinguishedName)`n`tGuid: $($GetUser.Guid)`n`tRecipientTypeDetails: $($GetUser.RecipientTypeDetails)") -NonInteractive $true
+            Write-Host "Details about the user:" -ForegroundColor Green
+            Write-Host "`tPrimarySMTPAddress: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetRecipient.PrimarySMTPAddress)" -ForegroundColor White
+            Write-Host "`tOrganizationalUnit: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetRecipient.OrganizationalUnit)" -ForegroundColor White
+            Write-Host "`tDistinguishedName: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetRecipient.DistinguishedName)" -ForegroundColor White
+            Write-Host "`tGuid: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetRecipient.Guid)" -ForegroundColor White
+            Write-Host "`tRecipientTypeDetails: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($GetRecipient.RecipientTypeDetails)" -ForegroundColor White
+            Write-Host
+
+            Write-Log ("[INFO] || Adding $User user to the UsersOK variable")
+
+            ### If found, added to the UsersOK list
+            $void = $UsersOK.Add($User)
+        }
+        catch {
+            ### If not found, added to the UsersNotOK list
+            Write-Log ("[WARNING] || Adding $User user to the UsersNotOK variable") -ForegroundColor Yellow
+            $void = $UsersNotOK.Add($User)
+        }
+    }
+
+    ### Throwing error if none of the affected users are UserMailboxes in the environment
+    if ($($UsersOK.Count) -eq 0) {
+        throw "The users provided do not have UserMailbox as RecipientType.`nIf the affected mailbox is in the Exchange Online environment, please restart the script from a PowerShell window that is not already connected to Exchange Online, and provide the PrimarySMTPAddress of the affected user.`nIf the script has to run on the Exchange OnPremises environment, please start a new Exchange Management Shell window, and start the script directly from it (using the -ConnectToExchangeOnPremises switch), and provide the PrimarySMTPAddress of the affected user."
+    }
+    elseif ($($UsersOK.Count) -gt 0) {
+        Write-Log ("[INFO] || List of users for which we will continue to collect the mailbox migration logs, using this method:`n`t$UsersOK")
+    }
+    
+    if ($($UsersNotOK.Count) -gt 0) {
+        Write-Log ("[WARNING] || List of users for which we will not continue to collect the mailbox migration logs:`n`t$UsersNotOK") -ForegroundColor Yellow
+    }
+
+    ### This function returns the list of users for which we can collect MailboxStatistics
+    return $UsersOK
+}
+
 
 #endregion Functions, Global variables
 
@@ -858,6 +1754,10 @@ function Collect-MigrationLogs {
 #region Main script
 
 try {
+    Clear-Host
+
+    $null = Show-Header
+
     $script:TheWorkingDirectory = Create-WorkingDirectory -NumberOfChecks 1
     Create-LogFile -WorkingDirectory $script:TheWorkingDirectory
 
@@ -867,14 +1767,17 @@ try {
 
     Write-Host
     Write-Host "Details from the mailbox migration log:" -ForegroundColor Green
-
-    Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
-    Write-Host "$($TheMigrationLogs.MailboxIdentity.Name)" -ForegroundColor White
-    Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
-    Write-Host "$($TheMigrationLogs.Status.Value)" -ForegroundColor White
-    Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
-    Write-Host "$($TheMigrationLogs.StatusDetail.Value)" -ForegroundColor White
-
+    foreach ($Entry in $script:LogsToAnalyze) {
+        Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
+        Write-Host "$($Entry.MailboxIdentity.Name)" -ForegroundColor White
+        Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
+        Write-Host "$([string]$Entry.Status)" -ForegroundColor White
+        Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
+        Write-Host "$([string]$Entry.StatusDetail)" -ForegroundColor White
+        Write-Host "`tExchangeGuid: " -ForegroundColor Cyan -NoNewline
+        Write-Host "$([string]$Entry.ExchangeGuid)" -ForegroundColor White
+        Write-Host
+    }
     #endregion ForTestPurposes
 
     #Show-Menu
@@ -884,6 +1787,7 @@ try {
 }
 finally {
     Restore-OriginalState
+    Get-PSSession | Remove-PSSession
 }
 
 #endregion Main script
