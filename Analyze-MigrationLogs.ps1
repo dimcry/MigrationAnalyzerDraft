@@ -811,8 +811,8 @@ function Ask-DetailsAboutMigrationType {
 function Selected-ConnectToExchangeOnlineOption {
     [CmdletBinding()]
     Param (
-        [string]
-        $AffectedUser,        
+        [string[]]
+        $AffectedUsers,        
         [string]
         $MigrationType,
         [string]
@@ -821,6 +821,47 @@ function Selected-ConnectToExchangeOnlineOption {
 
     ### We will try to connect to Exchange Online
     Test-EXOSession -TheAdminAccount $TheAdminAccount
+
+    if ($script:EXOPSSessionCreated) {
+        if (-not ($AffectedUsers)) {
+            ### TheAffectedUser variable will represent the Affected user for which we will try to collect mailbox migration related logs
+            Write-Log "[INFO] || Trying to collect the AffectedUser..."
+            [string]$AffectedUsers = Ask-ForDetailsAboutUser -NumberOfChecks 1
+        }
+
+        [System.Collections.ArrayList]$PrimarySMTPAddresses = @()
+        $TheRecipients = Find-TheRecipient -TheEnvironment 'Exchange Online' -TheAffectedUsers $AffectedUsers
+        foreach ($Recipient in $TheRecipients) {
+            $null = $PrimarySMTPAddresses.Add($($Recipient.PrimarySMTPAddress))
+        }
+
+        [string]$TheAddresses = ""
+        [int]$Counter = 0
+        if ($($PrimarySMTPAddresses.Count) -eq 1) {
+            $TheAddresses = $PrimarySMTPAddress
+        }
+        elseif ($($PrimarySMTPAddresses.Count) -gt 1) {
+            foreach ($PrimarySMTPAddress in $PrimarySMTPAddresses) {
+                if ($Counter -eq 0) {
+                    [string]$TheAddresses = $PrimarySMTPAddress
+                    $Counter++
+                }
+                elseif (($Counter -le $($PrimarySMTPAddresses.Count))) {
+                    [string]$TheAddresses = $TheAddresses + ", $PrimarySMTPAddress"
+                    $Counter++
+                }
+            }
+        }
+
+        if (-not ($MigrationType)) {
+            Write-Log ("[INFO] || The script will try to collect the Migration type")
+            [string]$MigrationType = Ask-DetailsAboutMigrationType -NumberOfChecks $NumberOfChecks -AffectedUser $TheAddresses
+        }
+        Collect-MigrationLogs -ConnectToExchangeOnline -MigrationType $MigrationType -AdminAccount $TheAdminAccount -AffectedUsers $PrimarySMTPAddresses
+    }
+
+    ### Collect the PrimarySMTPAddress of all affected users
+    #$PrimarySMTPAddress = Find-TheRecipient -TheEnvironment 'Exchange Online' -TheAffectedUsers $AffectedUser
 
 }
 
@@ -953,7 +994,7 @@ Function Test-EXOSession {
 		ConnectTo-ExchangeOnline -TheAdminAccount $TheAdminAccount -NumberOfChecks 1
 	}	
 	### Make sure it is in an opened state if not log and recreate
-	elseif ($SessionInfo.State -ne "Opened") {
+	elseif ($($SessionInfo.State) -ne "Opened") {
 		Write-Log "[ERROR] || The Exchange Online related PSSession is not in Open state" -ForegroundColor Red
 		Write-log ($SessionInfo | fl | Out-String ) -ForegroundColor Red
 		Write-log "[INFO] || Recreating the Exchange Online Session"
@@ -1004,13 +1045,140 @@ function Collect-MigrationLogs {
     }
     elseif ($ConnectToExchangeOnline) {
         ### Connecting to Exchange Online in order to collect the needed/correct mailbox migration logs
-        Write-Host "This part is not yet implemented" -ForegroundColor Red
+        #Write-Host "This part is not yet implemented" -ForegroundColor Red
+
+        if ($MigrationType -eq "Hybrid") {
+            Write-Log ("[INFO] || Collecting Get-MoveRequestStatistics for each Affected users")
+            $TheCommand = Create-CommandToInvoke -TheEnvironment 'Exchange Online' -CommandFor "MoveRequestStatistics"
+            if ($($TheCommand.Command)) {
+                try {
+                    $null = Get-Command $($TheCommand.Command) -ErrorAction Stop
+                    Collect-MoveRequestStatistics -AffectedUsers $AffectedUsers -TheCommand $TheCommand
+                }
+                catch {
+                    Write-Log "[ERROR] || You do not have permissions to run `"$($TheCommand.Command)`" command." -ForegroundColor Red
+                }
+            }
+        }
     }
     elseif ($ConnectToExchangeOnPremises) {
         ### Connecting to Exchange On-Premises in order to collect the outputs of relevant MoveHistory from Get-MailboxStatistics
         Write-Log ("[INFO] || Collecting MoveHistory from Get-MailboxStatistics for each Affected users")
-        Collect-MailboxStatistics -AffectedUsers $AffectedUsers -TheEnvironment 'Exchange OnPremises'
+        $TheCommand = Create-CommandToInvoke -TheEnvironment 'Exchange OnPremises' -CommandFor "MailboxStatistics"
+        if ($($TheCommand.Command)) {
+            try {
+                $null = Get-Command $($TheCommand.Command) -ErrorAction Stop
+                Collect-MailboxStatistics -AffectedUsers $AffectedUsers -TheEnvironment 'Exchange OnPremises' -TheCommand $TheCommand
+            }
+            catch {
+                Write-Log "[ERROR] || You do not have permissions to run `"$($TheCommand.Command)`" command." -ForegroundColor Red
+            }
+        }
     }
+}
+
+
+function Collect-MoveRequestStatistics {
+    param (
+        [string[]]
+        $AffectedUsers,
+        $TheCommand
+    )
+
+    foreach ($User in $AffectedUsers) {
+        try {
+            Write-Log ("[INFO] || Running the following command:`n`t$($TheCommand.FullCommand.Replace("`$User", "$User"))")
+            $MoveRequestStatistics = Invoke-Expression $($TheCommand.FullCommand)
+            Write-Log "[INFO] || MoveRequestStatistics successfully collected for `"$User`" user."
+            $void = $script:LogsToAnalyze.Add($MoveRequestStatistics)
+        }
+        catch {
+            Write-Log "[ERROR] || We were unable to collect MoveRequestStatistics for `"$User`" user."
+        }
+    }
+}
+
+
+
+### <summary>
+### Create-CommandToInvoke function is used to create the exact command to run, in order to collect the correct migration logs
+### </summary>
+### <param name="TheEnvironment">TheEnvironment represents the environment in which the command will run </param>
+function Create-CommandToInvoke {
+    param (
+        [ValidateSet("Exchange Online", "Exchange OnPremises")]
+        [string]
+        $TheEnvironment,
+        [ValidateSet("MoveRequestStatistics", "MoveRequest", "MigrationUserStatistics", "MigrationUser", "MigrationBatch", "SyncRequestStatistics", "SyncRequest", "MailboxStatistics", "Recipient")]
+        [string]
+        $CommandFor
+    )
+    
+    $TheResultantCommand = New-Object PSObject
+
+    if ($TheEnvironment -eq "Exchange Online") {
+        if ($CommandFor -eq "MoveRequestStatistics") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:EXOCommandsPrefix + "MoveRequestStatistics")
+            [string]$TheCommand = "Get-"+ $script:EXOCommandsPrefix + "MoveRequestStatistics `$User -IncludeReport -DiagnosticInfo `"showtimeslots, showtimeline, verbose`" -ErrorAction Stop"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+        }
+        elseif ($CommandFor -eq "MoveRequest") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:EXOCommandsPrefix + "MoveRequest")
+            [string]$TheCommand = "Get-"+ $script:EXOCommandsPrefix + "MoveRequest `$User -ErrorAction Stop"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+        }
+        elseif ($CommandFor -eq "MigrationUserStatistics") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:EXOCommandsPrefix + "MigrationUserStatistics")
+            [string]$TheCommand = "Get-"+ $script:EXOCommandsPrefix + "MigrationUserStatistics `$User -IncludeSkippedItems -IncludeReport -DiagnosticInfo `"showtimeslots, showtimeline, verbose`" -ErrorAction Stop"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+        }
+        elseif ($CommandFor -eq "MigrationUser") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:EXOCommandsPrefix + "MigrationUser")
+            [string]$TheCommand = "Get-"+ $script:EXOCommandsPrefix + "MigrationUser `$User -ErrorAction Stop"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+        }
+        elseif ($CommandFor -eq "MigrationBatch") {
+            <#
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:EXOCommandsPrefix + "MigrationBatch")
+            [string]$TheCommand = "(Get-"+ $script:EXOCommandsPrefix + "MigrationBatch `$User -IncludeReport -DiagnosticInfo `"showtimeslots, showtimeline, verbose`" -ErrorAction Stop"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+            #>
+        }
+        elseif ($CommandFor -eq "SyncRequestStatistics") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:EXOCommandsPrefix + "SyncRequestStatistics")
+            [string]$TheCommand = "Get-"+ $script:EXOCommandsPrefix + "SyncRequestStatistics `$User -IncludeReport -DiagnosticInfo `"showtimeslots, showtimeline, verbose`" -ErrorAction Stop"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+        }
+        elseif ($CommandFor -eq "SyncRequest") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:EXOCommandsPrefix + "SyncRequest")
+            [string]$TheCommand = "Get-"+ $script:EXOCommandsPrefix + "SyncRequest -Mailbox `$User -ErrorAction Stop"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+        }
+        elseif ($CommandFor -eq "MailboxStatistics") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:EXOCommandsPrefix + "MailboxStatistics")
+            [string]$TheCommand = "(Get-"+ $script:EXOCommandsPrefix + "MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory -ErrorAction Stop).MoveHistory | where {[string]`$(`$_.WorkloadType) -eq `"Onboarding`"} | select -First 1"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+        }
+        elseif ($CommandFor -eq "Recipient") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:EXOCommandsPrefix + "Recipient")
+            [string]$TheCommand = "Get-"+ $script:EXOCommandsPrefix + "Recipient `$User -ResultSize Unlimited -ErrorAction Stop"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+        }
+    }
+    else {
+        if ($CommandFor -eq "MailboxStatistics") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:ExOnPremCommandsPrefix + "MailboxStatistics")
+            [string]$TheCommand = "(Get-"+ $script:ExOnPremCommandsPrefix + "MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory -ErrorAction Stop).MoveHistory | where {[string]`$(`$_.WorkloadType) -eq `"Offboarding`"} | select -First 1"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand
+        }
+        elseif ($CommandFor -eq "Recipient") {
+            $TheResultantCommand | Add-Member -NotePropertyName Command -NotePropertyValue ("Get-"+ $script:ExOnPremCommandsPrefix + "Recipient")
+            [string]$TheCommand = "Get-"+ $script:ExOnPremCommandsPrefix + "Recipient `$User -ResultSize Unlimited -ErrorAction Stop"
+            $TheResultantCommand | Add-Member -NotePropertyName FullCommand -NotePropertyValue $TheCommand            
+        }
+    }
+
+    return $TheResultantCommand
 }
 
 
@@ -1020,20 +1188,14 @@ function Collect-MailboxStatistics {
         $AffectedUsers,
         [ValidateSet("Exchange Online", "Exchange OnPremises")]
         [string]
-        $TheEnvironment
+        $TheEnvironment,
+        $TheCommand
     )
-
-    if ($TheEnvironment -eq "Exchange Online") {
-        [string]$TheCommand = "(Get-"+ $script:EXOCommandsPrefix + "MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory -ErrorAction Stop).MoveHistory | where {[string]`$(`$_.WorkloadType.Value) -eq `"Onboarding`"} | select -First 1"
-    }
-    else {
-        [string]$TheCommand = "(Get-MailboxStatistics `$User -IncludeMoveReport -IncludeMoveHistory -ErrorAction Stop).MoveHistory | where {[string]`$(`$_.WorkloadType) -eq `"Offboarding`"} | select -First 1"
-    }
 
     foreach ($User in $AffectedUsers) {
         try {
-            Write-Log ("[INFO] || Running the following command:`n`t$TheCommand")
-            $MailboxStatistics = Invoke-Expression $TheCommand
+            Write-Log ("[INFO] || Running the following command:`n`t$($TheCommand.FullCommand.Replace("`$User", "$User"))")
+            $MailboxStatistics = Invoke-Expression $($TheCommand.FullCommand)
             Write-Log "[INFO] || MoveHistory successfully collected for `"$User`" user."
             $void = $script:LogsToAnalyze.Add($MailboxStatistics)
         }
@@ -1056,7 +1218,30 @@ function Selected-ConnectToExchangeOnPremisesOption {
         $TheAffectedUsers
     )
 
-    $script:OnPremisesPSSession = ConnectTo-ExchangeOnPremises -Prefix $script:ExOnPremCommandsPrefix -ExchangeURL $ExchangeURL -AuthenticationType $AuthenticationType -Domain $Domain -ADSite $ADSite -NumberOfChecks 1
+    ConnectTo-ExchangeOnPremises -Prefix $script:ExOnPremCommandsPrefix -ExchangeURL $ExchangeURL -AuthenticationType $AuthenticationType -Domain $Domain -ADSite $ADSite -NumberOfChecks 1
+    
+    if ($script:ExOnPremPSSessionCreated) {
+        if (-not ($TheAffectedUsers)) {
+            ### TheAffectedUser variable will represent the Affected user for which we will try to collect mailbox migration related logs
+            Write-Log "[INFO] || Trying to collect the AffectedUser..."
+            [string]$TheAffectedUsers = Ask-ForDetailsAboutUser -NumberOfChecks 1
+        }
+
+        [System.Collections.ArrayList]$PrimarySMTPAddresses = @()
+        $TheRecipients = Find-TheRecipient -TheEnvironment 'Exchange OnPremises' -TheAffectedUsers $TheAffectedUsers
+        foreach ($Recipient in $TheRecipients) {
+            Write-Log ("[INFO] || Checking if $($Recipient.PrimarySMTPAddress) is an UserMailbox in Exchange OnPremises")
+            if ($($Recipient.RecipientType) -eq "UserMailbox") {
+                Write-Log ("[INFO] || $($Recipient.PrimarySMTPAddress) is an $($Recipient.RecipientType) / $($Recipient.RecipientTypeDetails) in Exchange OnPremises")
+                Write-Log ("[INFO] || Adding $($Recipient.PrimarySMTPAddress) to the list of users for which we will collect MoveHistory from MailboxStatistics from Exchange OnPremises")
+                $null = $PrimarySMTPAddresses.Add($($Recipient.PrimarySMTPAddress))
+            }
+            else {
+                Write-Log ("[ERROR] || $($Recipient.PrimarySMTPAddress) is not an UserMailbox in Exchange OnPremises. It is an $($Recipient.RecipientType) / $($Recipient.RecipientTypeDetails)") -ForegroundColor Red
+            }
+        }
+        Collect-MigrationLogs -ConnectToExchangeOnPremises -AffectedUsers $PrimarySMTPAddresses
+    }
 }
 
 ### <summary>
@@ -1444,6 +1629,8 @@ function ConnectTo-ExchangeOnPremises {
         }
     }
     until ($script:ExOnPremPSSession)
+        #endregion Harvest exchange servers
+        #endregion Start auto resolve connection url
 } 
 
 
@@ -1746,6 +1933,41 @@ function Extract-CorrectListOfUsersForMailboxStatistics {
 }
 
 
+function Find-TheRecipient {
+    [CmdletBinding()]
+    Param (
+        [ValidateSet("Exchange Online", "Exchange OnPremises")]
+        [string]
+        $TheEnvironment,
+        [string[]]
+        $TheAffectedUsers
+    )
+
+    [System.Collections.ArrayList]$Recipients = @()
+    foreach ($User in $TheAffectedUsers) {
+        $TheCommand = Create-CommandToInvoke -TheEnvironment $TheEnvironment -CommandFor "Recipient"
+        try {
+            $Recipient = Invoke-Expression $($TheCommand.FullCommand)
+            Write-Log "[INFO] || We were able to identify the recipient in $TheEnvironment for `"$User`".`n`tPrimarySmtpAddress:`t$($Recipient.PrimarySmtpAddress)`n`tExchangeGuid:`t`t$($Recipient.ExchangeGuid)`n`tRecipientType:`t`t$($Recipient.RecipientType)`n`tRecipientTypeDetails:`t$($Recipient.RecipientTypeDetails)"
+            Write-Log "[INFO] || From now on, we will use its PrimarySMTPAddress, `"$($Recipient.PrimarySmtpAddress)`", when providing details about `"$User`""
+            $null = $Recipients.Add($Recipient)
+        }
+        catch {
+            Write-Log "[ERROR] || Unable to identify the Recipient using information you provided (`"$User`")" -ForegroundColor Red
+        }
+    }
+
+    if ($($Recipients.Count) -eq 0){
+        throw "We were unable to identify any Recipients in your organization, for the users you provided"
+    }
+    else {
+        return $Recipients
+    }
+    
+}
+
+
+
 #endregion Functions, Global variables
 
 ###############
@@ -1768,14 +1990,22 @@ try {
     Write-Host
     Write-Host "Details from the mailbox migration log:" -ForegroundColor Green
     foreach ($Entry in $script:LogsToAnalyze) {
-        Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
-        Write-Host "$($Entry.MailboxIdentity.Name)" -ForegroundColor White
-        Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
-        Write-Host "$([string]$Entry.Status)" -ForegroundColor White
-        Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
-        Write-Host "$([string]$Entry.StatusDetail)" -ForegroundColor White
-        Write-Host "`tExchangeGuid: " -ForegroundColor Cyan -NoNewline
-        Write-Host "$([string]$Entry.ExchangeGuid)" -ForegroundColor White
+        if ($($Entry.MailboxIdentity.Name)) {
+            Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$($Entry.MailboxIdentity.Name)" -ForegroundColor White
+        }
+        if ($([string]$Entry.Status)) {
+            Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$([string]$Entry.Status)" -ForegroundColor White
+        }
+        if ($([string]$Entry.StatusDetail)) {
+            Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$([string]$Entry.StatusDetail)" -ForegroundColor White
+        }
+        if ($([string]$Entry.ExchangeGuid)) {
+            Write-Host "`tExchangeGuid: " -ForegroundColor Cyan -NoNewline
+            Write-Host "$([string]$Entry.ExchangeGuid)" -ForegroundColor White
+        }
         Write-Host
     }
     #endregion ForTestPurposes
