@@ -127,10 +127,10 @@ function Create-MoveObject {
         [ValidateSet("FromFile", "FromExchangeOnline", "FromExchangeOnPremises")]
         [string]$LogFrom,
         
-        [ValidateSet("MoveRequestStatistics", "MigrationUserStatistics", "MigrationBatch", "MailboxStatistics")]
+        [ValidateSet("MoveRequestStatistics", "MoveRequest", "MigrationUserStatistics", "MigrationUser", "MigrationBatch", "SyncRequestStatistics", "SyncRequest", "MailboxStatistics", "FromFile")]
         [string]$LogType,
 
-        [ValidateSet("RemoteMove", "IMAP", "Cutover", "Staged")]
+        [ValidateSet("Hybrid", "IMAP", "Cutover", "Staged")]
         [string]$MigrationType
     )
 
@@ -143,22 +143,36 @@ function Create-MoveObject {
 
     
     # Pull everything that we need that is common to all status types
-    $MoveAnalysis.BasicInformation        = New-BasicInformation -RequestStats $MigrationLogs
-    $MoveAnalysis.PerformanceStatistics   = New-PerformanceStatistics -RequestStats $MigrationLogs
-    $MoveAnalysis.FailureSummary          = New-FailureSummary -RequestStats $MigrationLogs
+    $MoveAnalysis.BasicInformation        = New-BasicInformation -RequestStats $($MigrationLogs.Logs)
+    $MoveAnalysis.PerformanceStatistics   = New-PerformanceStatistics -RequestStats $($MigrationLogs.Logs)
+    $MoveAnalysis.FailureSummary          = New-FailureSummary -RequestStats $($MigrationLogs.Logs)
     $MoveAnalysis.FailureStatistics       = New-FailureStatistics -FailureSummaries $MoveAnalysis.FailureSummary
-    $MoveAnalysis.LargeItemSummary        = New-LargeItemSummary -RequestStats $MigrationLogs
-    $MoveAnalysis.BadItemSummary          = New-BadItemSummary -RequestStats $MigrationLogs
+    $MoveAnalysis.LargeItemSummary        = New-LargeItemSummary -RequestStats $($MigrationLogs.Logs)
+    $MoveAnalysis.BadItemSummary          = New-BadItemSummary -RequestStats $($MigrationLogs.Logs)
 
     # Add fields that are not printed in the analysis
-    $MoveAnalysis | Add-Member -NotePropertyName Report -NotePropertyValue $MigrationLogs.Report
-    $MoveAnalysis | Add-Member -NotePropertyName DiagnosticInfo -NotePropertyValue $MigrationLogs.DiagnosticInfo
+    $MoveAnalysis | Add-Member -NotePropertyName Report -NotePropertyValue $($MigrationLogs.Logs.Report)
+    $MoveAnalysis | Add-Member -NotePropertyName DiagnosticInfo -NotePropertyValue $($MigrationLogs.Logs.DiagnosticInfo)
+
+    $timelineMonth = Build-TimeTrackerTable -MrsJob $($MigrationLogs.Logs) -Aggregation Month
+    $timelineDay = Build-TimeTrackerTable -MrsJob $($MigrationLogs.Logs) -Aggregation Day
+    $timelineHour = Build-TimeTrackerTable -MrsJob $($MigrationLogs.Logs) -Aggregation Hour
+    $timelineMinute = Build-TimeTrackerTable -MrsJob $($MigrationLogs.Logs) -Aggregation Minute
+
+    $Timeline = New-Object PSObject
+    $Timeline | Add-Member -NotePropertyName timelineMonth -NotePropertyValue $timelineMonth
+    $Timeline | Add-Member -NotePropertyName timelineDay -NotePropertyValue $timelineDay
+    $Timeline | Add-Member -NotePropertyName timelineHour -NotePropertyValue $timelineHour
+    $Timeline | Add-Member -NotePropertyName timelineMinute -NotePropertyValue $timelineMinute
+
+    $MoveAnalysis | Add-Member -NotePropertyName Timeline -NotePropertyValue $Timeline
 
     $DetailsAboutTheMove = New-Object PSObject
     $DetailsAboutTheMove | Add-Member -NotePropertyName Environment -NotePropertyValue $TheEnvironment
     $DetailsAboutTheMove | Add-Member -NotePropertyName LogFrom -NotePropertyValue $LogFrom
     $DetailsAboutTheMove | Add-Member -NotePropertyName LogType -NotePropertyValue $LogType
     $DetailsAboutTheMove | Add-Member -NotePropertyName MigrationType -NotePropertyValue $MigrationType
+    $DetailsAboutTheMove | Add-Member -NotePropertyName PrimarySMTPAddress -NotePropertyValue $($MigrationLogs.PrimarySMTPAddress)
 
     $MoveAnalysis | Add-Member -NotePropertyName DetailsAboutTheMove -NotePropertyValue $DetailsAboutTheMove
     
@@ -201,73 +215,6 @@ Function New-BasicInformation
         BadItems        = $RequestStats.Report.BadItems
         LargeItems      = $RequestStats.Report.LargeItems
     })
-}
-
-# Add values to the object relevant to failed moves
-Function Add-BasicInformationFailed
-{
-    Param(
-        [Parameter(Mandatory = $true)]
-        $RequestStats,
-
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        [array]$BasicInformation
-    )
-
-    BEGIN
-    {
-        # Build all properties to be added to the oubject
-        $Properties = [ordered]@{
-            FailureTimestamp    = $RequestStats.FailureTimestamp
-            FailureType         = $RequestStats.FailureType
-            FailureSide         = ([String]$RequestStats.FailureSide)
-        }
-    }
-
-    PROCESS
-    {
-        foreach ($info in $BasicInformation)
-        {
-            # Add them to the object
-            $info | Add-Member -NotePropertyMembers $Properties
-        }
-    }
-}
-
-# Add values to the object relevant to completed moves
-Function Add-BasicInformationComplete
-{
-    Param(
-        [Parameter(Mandatory = $true)]
-        $RequestStats,
-
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        [array]$BasicInformation
-    )
-
-    BEGIN
-    {
-        $SourceMailboxSizeBytes = $null
-        $RequestStats.report.sourcemailboxsize | Select-Object *size | Get-Member -MemberType noteproperty | foreach { $SourceMailboxSizeBytes = $SourceMailboxSizeBytes + $RequestStats.Report.SourceMailboxsize.($_.name) }
-
-        $TargetMailboxSizeBytes = $null
-        $RequestStats.report.targetmailboxsize | Select-Object *size | Get-Member -MemberType noteproperty | foreach { $TargetMailboxSizeBytes = $TargetMailboxSizeBytes + $RequestStats.Report.Targetmailboxsize.($_.name) }
-
-        $Properties = [ordered]@{
-            SourceMailboxSizeGB = $SourceMailboxSizeBytes / 1GB
-            TargetMailboxSizeGB = $TargetMailboxSizeBytes / 1GB
-            PercentMailboxBloat = (($TargetMailboxSizeBytes - $SourceMailboxSizeBytes) / $SourceMailboxSizeBytes) * 100
-        }
-    }
-
-    PROCESS
-    {
-        foreach ($info in $BasicInformation)
-        {
-            # Add the properties to the object
-            $info | Add-Member -NotePropertyMembers $Properties
-        }
-    }
 }
 
 # Build information for mailbox verification
@@ -350,36 +297,6 @@ Function New-PerformanceStatistics
         PercentDurationLocked     = Eval-Safe { ((DurationToSeconds $RequestStats.TotalStalledDueToMailboxLockedDuration) / (DurationtoSeconds $RequestStats.OverallDuration)) * 100 } -DefaultValue 0
         PercentDurationTransient  = Eval-Safe { ((DurationToSeconds $RequestStats.TotalTransientFailureDuration) / (DurationtoSeconds $RequestStats.OverallDuration)) * 100 } -DefaultValue 0
     })
-}
-
-Function Add-PerformanceStatisticsComplete
-{
-    Param(
-        [Parameter(Mandatory = $true)]
-        $RequestStats,
-
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        [array]$PerformanceStatistics
-    )
-
-    BEGIN
-    {
-            $TargetMailboxSizeBytes = $null
-            $RequestStats.report.targetmailboxsize | Select-Object *size | Get-Member -MemberType noteproperty | foreach { $TargetMailboxSizeBytes = $TargetMailboxSizeBytes + $RequestStats.Report.Targetmailboxsize.($_.name) }
-
-            $Properties = [ordered]@{
-                TransferOverHeadPercent = Eval-Safe { (((Get-Bytes $RequestStats.BytesTransferred) - $TargetMailboxSizeBytes) / (Get-Bytes $RequestStats.BytesTransferred) ) * 100 } -DefaultValue 0
-            }
-    }
-
-    PROCESS
-    {
-        foreach ($perfStat in $PerformanceStatistics)
-        {
-            # Add them to the object
-            $perfStat | Add-Member -NotePropertyMembers $Properties
-        }
-    }
 }
 
 # Creates an object with just the failure message and timestamp
@@ -529,12 +446,112 @@ Function Test-CommandExists
     $result
 } #end function test-CommandExists
 
+function Build-TimeTrackerTable
+{
+    <#
+        .Synopsis
+        Retrieves the set of MRS indexes in AD for jobs matching the given query.
+
+        .Parameter MrsJob
+        An object returned by Get-*RequestStatistics with detailed time-tracker data.
+		These data are obtained by passing these arguments to the cmdlet: -Diagnostic -DiagnosticArgument "showtimeline,verbose"
+
+        .Parameter Aggregation
+        Build the table from the ByMinute, ByHour, ByDay or ByMonth XML aggregations.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        $MrsJob,
+        [Parameter(Mandatory=$false)]
+        [ValidateSet('Minute', 'Hour', 'Day', 'Month')]
+        [string]
+        $Aggregation = 'Hour'
+    )
+
+    $diagnosticInfo = [xml]$MrsJob.DiagnosticInfo
+    if ($diagnosticInfo -eq $null)
+    {
+        return
+    }
+
+	$seriesName = 'By{0}' -f $Aggregation
+    $seriesData = $diagnosticInfo.Job.TimeTracker.Timeline.$seriesName
+    if ($seriesData -eq $null -or $seriesData.$Aggregation.Count -eq 0)
+    {
+        return
+    }
+
+    $seriesSize = $seriesData.$Aggregation.D.Count
+    $series = [System.Collections.Generic.List[object]]::new($seriesSize)
+    foreach ($hour in $seriesData.$Aggregation)
+    {
+        $startTime = $hour.StartTime -as [DateTime]
+        foreach ($entry in $hour.D)
+        {
+            $state = $entry.State
+            $duration = $entry.Duration -as [TimeSpan]
+			$msecs = $entry.MSecs -as [long]
+            $row = [PSCustomObject][Ordered]@{
+                'StartTime' = $startTime
+                'State' = $state
+                'Duration' = $duration
+				'Milliseconds' = $msecs
+				'CumulativeDuration' = $null
+				'CumulativeMilliseconds' = $null
+            }
+
+            $series.Add($row)
+        }
+    }
+
+	$series = $series | sort StartTime, State
+
+	$gSeries = $series | group -NoElement State
+	$accumulations = @{}
+	$gSeries.Name | %{ $accumulations[$_] = [TimeSpan]::Zero }
+
+    $series | %{
+		$state = $_.State
+		$accumulation = $accumulations[$state]
+		$accumulation += $_.Duration
+		$accumulations[$state] = $accumulation
+		$_.CumulativeDuration = $accumulation
+		$_.CumulativeMilliseconds = $accumulation.TotalMilliseconds
+	}
+
+	$series
+}
+
 
 $Data = Import-Clixml C:\1.xml
-$TheInfo = Create-MoveObject -MigrationLogs $Data -TheEnvironment 'Exchange Online' -LogFrom FromFile -LogType MoveRequestStatistics -MigrationType RemoteMove
+$TheInfo = Create-MoveObject -MigrationLogs $LogEntry -TheEnvironment 'Exchange Online' -LogFrom FromFile -LogType FromFile -MigrationType Hybrid
 
 $MigrationUserStatistics = Import-Clixml C:\Temp\MigrationUserStatistics.xml
-$TheInfo = Create-MoveObject -MigrationLogs $MigrationUserStatistics -TheEnvironment 'Exchange Online' -LogFrom FromFile -LogType MigrationUserStatistics -MigrationType RemoteMove
+
+$LogEntry = New-Object PSObject
+$LogEntry | Add-Member -NotePropertyName PrimarySMTPAddress -NotePropertyValue "FromFile"
+$LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $Data
+$Entry = Create-MoveObject -MigrationLogs $LogEntry -TheEnvironment 'Exchange Online' -LogFrom FromFile -LogType FromFile -MigrationType Hybrid
+
+[int]$TheDurationMilliseconds = 0
+foreach ($TimelineEntry in $($Entry.Timeline.timelineMonth)) {
+    $TheDurationMilliseconds = $TheDurationMilliseconds + $($TimelineEntry.Milliseconds)
+}
+
+$timelineMonthSorted = $($Entry.Timeline.timelineMonth) | sort Milliseconds -Descending | select -First 3
+$timelineMonthSorted | ft -AutoSize
+Write-Host "The job was impacted mostly, by the following:" -ForegroundColor Green
+foreach ($timelineMonthSortedEntry in $timelineMonthSorted) {
+    Write-Host "`t$($timelineMonthSortedEntry.State): " -ForegroundColor Cyan -NoNewline
+    Write-Host "`t$($timelineMonthSortedEntry.Milliseconds)" -ForegroundColor White -NoNewline
+    $ThePercent = (([int]$($timelineMonthSortedEntry.Milliseconds)/[int]$TheDurationMilliseconds)*100).ToString("#.##")
+    Write-Host " ($ThePercent `%)"
+}
+
+
+
+
+
 
 $TheInfo.GetType()
 $TheInfo | Get-Member
