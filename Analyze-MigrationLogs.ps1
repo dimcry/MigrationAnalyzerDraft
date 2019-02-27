@@ -362,6 +362,26 @@ function Create-LogFile {
 ### </summary>
 function Check-Parameters {
 
+    if ($AffectedUsers) {
+        [string]$TheUsersToCheck = ""
+        [int]$Counter = 0
+        if ($($AffectedUsers.Count) -eq 1) {
+            $TheUsersToCheck = $AffectedUsers[0]
+        }
+        elseif ($($AffectedUsers.Count) -gt 1) {
+            foreach ($User in $AffectedUsers) {
+                if ($Counter -eq 0) {
+                    [string]$TheUsersToCheck = $User
+                    $Counter++
+                }
+                elseif (($Counter -le $($AffectedUsers.Count))) {
+                    [string]$TheUsersToCheck = $TheUsersToCheck + ", $User"
+                    $Counter++
+                }
+            }
+        }
+    }
+
     ### If FilePath parameter of the script was used, we will continue on this path.
     if ($FilePath){
         Write-Log ("[INFO] || The script was started with the FilePath parameter: `"-FilePath $FilePath`"")
@@ -369,13 +389,13 @@ function Check-Parameters {
     }
     ### If ConnectToExchangeOnline parameter of the script was used, we will continue on this path.
     elseif ($ConnectToExchangeOnline) {
-        Write-Log ("[INFO] || The script was started with the ConnectToExchangeOnline parameter: `"-ConnectToExchangeOnline:$true -AffectedUsers $AffectedUsers -MigrationType $MigrationType -TheAdminAccount $AdminAccount`"")
+        Write-Log ("[INFO] || The script was started with the ConnectToExchangeOnline parameter: `"-ConnectToExchangeOnline:`$true -AffectedUsers $TheUsersToCheck -MigrationType $MigrationType -EXOAdminAccount $EXOAdminAccount`"")
         Selected-ConnectToExchangeOnlineOption -AffectedUser $AffectedUsers -MigrationType $MigrationType -TheAdminAccount $EXOAdminAccount
     }
     ### If ConnectToExchangeOnPremises parameter of the script was used, we will continue on this path.
     elseif ($ConnectToExchangeOnPremises) {
-        Write-Log ("[INFO] || The script was started with the ConnectToExchangeOnPremises parameter.")
-        Selected-ConnectToExchangeOnPremisesOption -TheAffectedUsers $AffectedUsers
+        Write-Log ("[INFO] || The script was started with the ConnectToExchangeOnPremises parameter: `"-ConnectToExchangeOnPremises:`$true -AffectedUsers $TheUsersToCheck -ExchangeURL $ExchangeURL -OnPremAdminAccount $OnPremAdminAccount -AuthenticationType $AuthenticationType -Domain $Domain -ADSite $ADSite`"")
+        Selected-ConnectToExchangeOnPremisesOption -TheAffectedUsers $AffectedUsers -TheAdminAccount $OnPremAdminAccount
     }
     ### If the script was started without any parameters, we will provide a menu in order to continue
     else {
@@ -838,7 +858,7 @@ function Selected-ConnectToExchangeOnlineOption {
         [string]$TheAddresses = ""
         [int]$Counter = 0
         if ($($PrimarySMTPAddresses.Count) -eq 1) {
-            $TheAddresses = $PrimarySMTPAddress
+            $TheAddresses = $PrimarySMTPAddresses[0]
         }
         elseif ($($PrimarySMTPAddresses.Count) -gt 1) {
             foreach ($PrimarySMTPAddress in $PrimarySMTPAddresses) {
@@ -1215,10 +1235,12 @@ function Selected-ConnectToExchangeOnPremisesOption {
     [CmdletBinding()]
     Param (
         [string[]]
-        $TheAffectedUsers
+        $TheAffectedUsers,
+        [string]
+        $TheAdminAccount
     )
 
-    ConnectTo-ExchangeOnPremises -Prefix $script:ExOnPremCommandsPrefix -ExchangeURL $ExchangeURL -AuthenticationType $AuthenticationType -Domain $Domain -ADSite $ADSite -NumberOfChecks 1
+    ConnectTo-ExchangeOnPremises -Prefix $script:ExOnPremCommandsPrefix -ExchangeURL $ExchangeURL -AuthenticationType $AuthenticationType -Domain $Domain -ADSite $ADSite -AdminAccount $TheAdminAccount -NumberOfChecks 1
     
     if ($script:ExOnPremPSSessionCreated) {
         if (-not ($TheAffectedUsers)) {
@@ -1280,7 +1302,7 @@ function ConnectTo-ExchangeOnPremises {
     [String]$Prefix,
 
     [Parameter(Mandatory = $false)]
-    [string]$OnPremAdminAccount,
+    [string]$AdminAccount,
 
     [int]
     $NumberOfChecks
@@ -1525,44 +1547,97 @@ function ConnectTo-ExchangeOnPremises {
                 $serverconnection = $exchangeurl
             }
 
-            $i = 0
-            while ((-not ($script:ExOnPremCredential)) -and ($i -lt 5)){
-                $script:ExOnPremCredential = Get-Credential $OnPremAdminAccount -Message "Please provide your Exchange OnPremises Credentials:"
-            }
-
-            if ([string]::IsNullOrWhiteSpace($OnPremAdminAccount)) {
-                try {
-                    $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -ErrorAction Stop
-                }
-                catch {
-                    Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises without explicit credentials"
-                }
-            }
-
-            #if ($script:ExOnPremCredential) {
-                if ([string]::IsNullOrWhiteSpace($authenticationtype)) {
+            if (-not ($AdminAccount)) {
+                if (-not ($AuthenticationType)) {
+                    Write-Log "[INFO] || The script will try to connect to Exchange On-Premises with the current credentials"
                     try {
-                        $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -Credential $script:ExOnPremCredential -ErrorAction Stop
+                        $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -ErrorAction Stop
                     }
                     catch {
-                        Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName))"
+                        Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises with the current credentials" -ForegroundColor Red
+                        if ((-not ($script:ExOnPremCredential))) {
+                            Write-Log "[INFO] || The script will try to collect credentials to connect to Exchange On-Premises"
+                            $i = 0
+                            while ((-not ($script:ExOnPremCredential)) -and ($i -lt 5)) {
+                                $script:ExOnPremCredential = Get-Credential $AdminAccount -Message "Please provide your Exchange OnPremises Credentials:"
+                            }
+                        }
+                            
+                        if ((-not ($script:ExOnPremCredential))) {
+                            throw "We were unable to collect credentials to connect to Exchange On-Premises"
+                        }
+
+                        Write-Log ("[INFO] || The script will try to connect to Exchange On-Premises using explicit credentials (of user $($script:ExOnPremCredential.UserName)), using the Basic AuthenticationType")
                         try {
                             $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -Credential $script:ExOnPremCredential -Authentication Basic -ErrorAction Stop
                         }
                         catch {
-                            Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName)), using the provided authentication type ($authenticationtype)"
+                            Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName)), using the Basic AuthenticationType"
                         }
                     }
                 }
                 else {
+                    Write-Log "[INFO] || The script will try to connect to Exchange On-Premises with the current credentials using the $AuthenticationType AuthenticationType"
                     try {
-                        $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -Credential $script:ExOnPremCredential -Authentication $authenticationtype -ErrorAction Stop
+                        $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -AuthenticationType $AuthenticationType -ErrorAction Stop
                     }
                     catch {
-                        Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName)), using the provided authentication type ($authenticationtype)"
+                        Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises with the current credentials using the $AuthenticationType AuthenticationType" -ForegroundColor Red
+                        if ((-not ($script:ExOnPremCredential))) {
+                            Write-Log "[INFO] || The script will try to collect credentials to connect to Exchange On-Premises"
+                            $i = 0
+                            while ((-not ($script:ExOnPremCredential)) -and ($i -lt 5)){
+                                $script:ExOnPremCredential = Get-Credential $AdminAccount -Message "Please provide your Exchange OnPremises Credentials:"
+                            }
+                        }
+                            
+                        if ((-not ($script:ExOnPremCredential))) {
+                            throw "We were unable to collect credentials to connect to Exchange On-Premises"
+                        }
+
+                        Write-Log ("[INFO] || The script will try to connect to Exchange On-Premises using explicit credentials (of user $($script:ExOnPremCredential.UserName)) and the $AuthenticationType AuthenticationType")
+                        try {
+                            $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -Credential $script:ExOnPremCredential -Authentication $AuthenticationType -ErrorAction Stop
+                        }
+                        catch {
+                            Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName)), using the ($AuthenticationType) AuthenticationType"
+                        }
                     }
                 }
-            #}
+            }
+            else {
+                if ((-not ($script:ExOnPremCredential))) {
+                    Write-Log "[INFO] || The script will try to collect password of $AdminAccount user to connect to Exchange On-Premises"
+                    $i = 0
+                    while ((-not ($script:ExOnPremCredential)) -and ($i -lt 5)){
+                        $script:ExOnPremCredential = Get-Credential $AdminAccount -Message "Please provide your Exchange OnPremises Credentials:"
+                    }
+                }
+                    
+                if ((-not ($script:ExOnPremCredential))) {
+                    throw "We were unable to collect password of $AdminAccount user to connect to Exchange On-Premises"
+                }
+
+                if (-not ($AuthenticationType)) {
+                    Write-Log ("[INFO] || The script will try to connect to Exchange On-Premises using explicit credentials (of user $($script:ExOnPremCredential.UserName)), using the Basic AuthenticationType")
+                    try {
+                        $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -Credential $script:ExOnPremCredential -Authentication Basic -ErrorAction Stop
+                    }
+                    catch {
+                        Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName)), using the Basic AuthenticationType"
+                    }
+                }
+                else {
+                        Write-Log ("[INFO] || The script will try to connect to Exchange On-Premises using explicit credentials (of user $($script:ExOnPremCredential.UserName)) and the $AuthenticationType AuthenticationType")
+                        try {
+                            $script:ExOnPremPSSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $serverconnection -Credential $script:ExOnPremCredential -Authentication $AuthenticationType -ErrorAction Stop
+                        }
+                        catch {
+                            Write-Log "[ERROR] || The script was unable to connect to Exchange On-Premises using the provided credentials (of user $($script:ExOnPremCredential.UserName)), using the ($AuthenticationType) AuthenticationType"
+                        }
+                    
+                }
+            }
 
             try {
                 $null = Import-PSSession $script:ExOnPremPSSession -AllowClobber -Prefix $script:ExOnPremCommandsPrefix
