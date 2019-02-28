@@ -536,6 +536,12 @@ function Selected-FileOption {
         ### TheMigrationLogs variable will represent MigrationLogs collected using the Collect-MigrationLogs function.
         Write-Log "[INFO] || Trying to collect the Migration Logs using Selected-FileOption -> Collect-MigrationLogs function..."
         Collect-MigrationLogs -XMLFile $PathOfXMLFile
+        if ($script:LogsToAnalyze) {
+            foreach ($LogEntry in $script:LogsToAnalyze) {
+                $TheInfo = Create-MoveObject -MigrationLogs $LogEntry -TheEnvironment FromFile -LogFrom FromFile -LogType FromFile -MigrationType FromFile
+                $null = $script:ParsedLogs.Add($TheInfo)
+            }
+        }
     }
 
 }
@@ -887,10 +893,6 @@ function Selected-ConnectToExchangeOnlineOption {
             }
         }
     }
-
-    ### Collect the PrimarySMTPAddress of all affected users
-    #$PrimarySMTPAddress = Find-TheRecipient -TheEnvironment 'Exchange Online' -TheAffectedUsers $AffectedUser
-
 }
 
 ### <summary>
@@ -1127,7 +1129,7 @@ function Collect-MoveRequestStatistics {
             $void = $script:LogsToAnalyze.Add($LogEntry)
         }
         catch {
-            Write-Log "[ERROR] || We were unable to collect MoveRequestStatistics for `"$User`" user."
+            Write-Log "[ERROR] || We were unable to collect MoveRequestStatistics for `"$User`" user." -ForegroundColor Red
         }
     }
 }
@@ -1279,7 +1281,32 @@ function Selected-ConnectToExchangeOnPremisesOption {
                 Write-Log ("[ERROR] || $($Recipient.PrimarySMTPAddress) is not an UserMailbox in Exchange OnPremises. It is an $($Recipient.RecipientType) / $($Recipient.RecipientTypeDetails)") -ForegroundColor Red
             }
         }
+
+        [string]$TheAddresses = ""
+        [int]$Counter = 0
+        if ($($PrimarySMTPAddresses.Count) -eq 1) {
+            $TheAddresses = $PrimarySMTPAddresses[0]
+        }
+        elseif ($($PrimarySMTPAddresses.Count) -gt 1) {
+            foreach ($PrimarySMTPAddress in $PrimarySMTPAddresses) {
+                if ($Counter -eq 0) {
+                    [string]$TheAddresses = $PrimarySMTPAddress
+                    $Counter++
+                }
+                elseif (($Counter -le $($PrimarySMTPAddresses.Count))) {
+                    [string]$TheAddresses = $TheAddresses + ", $PrimarySMTPAddress"
+                    $Counter++
+                }
+            }
+        }
+
         Collect-MigrationLogs -ConnectToExchangeOnPremises -AffectedUsers $PrimarySMTPAddresses
+        if ($script:LogsToAnalyze) {
+            foreach ($LogEntry in $script:LogsToAnalyze) {
+                $TheInfo = Create-MoveObject -MigrationLogs $LogEntry -TheEnvironment 'Exchange OnPremises' -LogFrom FromExchangeOnPremises -LogType MailboxStatistics -MigrationType Hybrid
+                $null = $script:ParsedLogs.Add($TheInfo)
+            }
+        }
     }
 }
 
@@ -2182,7 +2209,7 @@ function Create-MoveObject {
     param (
         $MigrationLogs,
         
-        [ValidateSet("Exchange Online", "Exchange OnPremises")]
+        [ValidateSet("Exchange Online", "Exchange OnPremises", "FromFile")]
         [string]$TheEnvironment,
         
         [ValidateSet("FromFile", "FromExchangeOnline", "FromExchangeOnPremises")]
@@ -2191,7 +2218,7 @@ function Create-MoveObject {
         [ValidateSet("MoveRequestStatistics", "MoveRequest", "MigrationUserStatistics", "MigrationUser", "MigrationBatch", "SyncRequestStatistics", "SyncRequest", "MailboxStatistics", "FromFile")]
         [string]$LogType,
 
-        [ValidateSet("Hybrid", "IMAP", "Cutover", "Staged")]
+        [ValidateSet("Hybrid", "IMAP", "Cutover", "Staged", "FromFile")]
         [string]$MigrationType
     )
 
@@ -2206,10 +2233,10 @@ function Create-MoveObject {
     # Pull everything that we need that is common to all status types
     $MoveAnalysis.BasicInformation        = New-BasicInformation -RequestStats $($MigrationLogs.Logs)
     $MoveAnalysis.PerformanceStatistics   = New-PerformanceStatistics -RequestStats $($MigrationLogs.Logs)
-    $MoveAnalysis.FailureSummary          = New-FailureSummary -RequestStats $($MigrationLogs.Logs)
-    $MoveAnalysis.FailureStatistics       = New-FailureStatistics -FailureSummaries $MoveAnalysis.FailureSummary
-    $MoveAnalysis.LargeItemSummary        = New-LargeItemSummary -RequestStats $($MigrationLogs.Logs)
-    $MoveAnalysis.BadItemSummary          = New-BadItemSummary -RequestStats $($MigrationLogs.Logs)
+    ##$MoveAnalysis.FailureSummary          = New-FailureSummary -RequestStats $($MigrationLogs.Logs)
+    ##$MoveAnalysis.FailureStatistics       = New-FailureStatistics -FailureSummaries $MoveAnalysis.FailureSummary
+    ##$MoveAnalysis.LargeItemSummary        = New-LargeItemSummary -RequestStats $($MigrationLogs.Logs)
+    ##$MoveAnalysis.BadItemSummary          = New-BadItemSummary -RequestStats $($MigrationLogs.Logs)
 
     # Add fields that are not printed in the analysis
     $MoveAnalysis | Add-Member -NotePropertyName Report -NotePropertyValue $($MigrationLogs.Logs.Report)
@@ -2343,10 +2370,10 @@ Function New-PerformanceStatistics
 
     New-Object PSObject -Property ([ordered]@{
         MigrationDuration         = $RequestStats.TotalInProgressDuration
-        TotalGBTransferred        = (Get-Bytes $RequestStats.BytesTransferred) / 1GB
+        ##TotalGBTransferred        = (Get-Bytes $RequestStats.BytesTransferred) / 1GB
         PercentComplete           = $RequestStats.PercentComplete
-        DataTransferRateMBPerHour = Eval-Safe { (((Get-Bytes $RequestStats.BytesTransferred) / 1MB) / (DurationtoSeconds $RequestStats.TotalInProgressDuration)) * 3600 }
-        DataTransferRateGBPerHour = Eval-Safe { (((Get-Bytes $RequestStats.BytesTransferred) / 1GB) / (DurationtoSeconds $RequestStats.TotalInProgressDuration)) * 3600 }
+        ##DataTransferRateMBPerHour = Eval-Safe { (((Get-Bytes $RequestStats.BytesTransferred) / 1MB) / (DurationtoSeconds $RequestStats.TotalInProgressDuration)) * 3600 }
+        ##DataTransferRateGBPerHour = Eval-Safe { (((Get-Bytes $RequestStats.BytesTransferred) / 1GB) / (DurationtoSeconds $RequestStats.TotalInProgressDuration)) * 3600 }
         AverageSourceLatency      = Eval-Safe { $RequestStats.report.sessionstatistics.sourcelatencyinfo.average }
         AverageDestinationLatency = Eval-Safe { $RequestStats.report.sessionstatistics.destinationlatencyinfo.average }
         SourceSideDuration        = Eval-Safe { $RequestStats.Report.SessionStatistics.SourceProviderInfo.TotalDuration }
@@ -2618,13 +2645,40 @@ try {
         }
 
         if ($($Entry.DetailsAboutTheMove.PrimarySMTPAddress)) {
-            Write-Host "`tPrimarySMTPAddress: " -ForegroundColor Cyan -NoNewline
+            Write-Host "PrimarySMTPAddress: " -ForegroundColor Cyan
             Write-Host "$($Entry.DetailsAboutTheMove.PrimarySMTPAddress)" -ForegroundColor White
+            Write-Log ("PrimarySMTPAddress: `n$($Entry.DetailsAboutTheMove.PrimarySMTPAddress)") -NonInteractive $true
+            Write-Host
         }
+
+        if ($($Entry.BasicInformation)) {
+            Write-Host "Basic Information: " -ForegroundColor Cyan
+            $($Entry.BasicInformation)
+            Write-Log ("Basic Information: `n$($Entry.BasicInformation)") -NonInteractive $true
+            Write-Host
+        }
+
+        if ($($Entry.PerformanceStatistics)) {
+            Write-Host "Performance Statistics: " -ForegroundColor Cyan
+            $($Entry.PerformanceStatistics)
+            Write-Log ("Performance Statistics: `n$($Entry.PerformanceStatistics)") -NonInteractive $true
+            Write-Host
+        }
+
         if ($($Entry.Timeline.timelineMonth)) {
-            Write-Host "`tDetails about timeline, by month: " -ForegroundColor Cyan
+            Write-Host "Details about timeline, by month: " -ForegroundColor Cyan
             $TheEntriesToDisplay = $($Entry.Timeline.timelineMonth)
-            Write-Host "$($Entry.DetailsAboutTheMove.PrimarySMTPAddress)" -ForegroundColor White
+            $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 5 | ft -AutoSize
+            <#foreach ($timelineMonthSortedEntry in $TheEntriesToDisplay) {
+                Write-Host 
+                Write-Host "`t$($timelineMonthSortedEntry.State): " -ForegroundColor Cyan -NoNewline
+                Write-Host "`t$($timelineMonthSortedEntry.Milliseconds)" -ForegroundColor White -NoNewline
+                $ThePercent = (([int]$($timelineMonthSortedEntry.Milliseconds)/[int]$TheDurationMilliseconds)*100).ToString("#.##")
+                Write-Host " ($ThePercent `%)"
+            }#>
+            $TheSortedEntriesToDisplay = $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 5
+            Write-Log ("Details about timeline, by month: `n$TheSortedEntriesToDisplay") -NonInteractive $true
+            Write-Host
         }
 
         Write-Host
@@ -2677,3 +2731,24 @@ finally {
 #####################################
 # Create / update .xml / .json file #
 #####################################
+
+
+##########################
+# Run the script section #
+##########################
+<#
+### Analyze migration logs from .xml file:
+.\Analyze-MigrationLogs.ps1 -FilePath C:\1.xml
+
+### Analyze MoveRequestStatistics, from Exchange Online:
+.\Analyze-MigrationLogs.ps1 -ConnectToExchangeOnline
+.\Analyze-MigrationLogs.ps1 -ConnectToExchangeOnline -EXOAdminAccount Administrator@dimcryro.onmicrosoft.com
+.\Analyze-MigrationLogs.ps1 -ConnectToExchangeOnline -AffectedUsers dtest5, dtest6, dtest2 -EXOAdminAccount Administrator@dimcryro.onmicrosoft.com
+.\Analyze-MigrationLogs.ps1 -ConnectToExchangeOnline -AffectedUsers dtest5, dtest6, dtest2 -EXOAdminAccount Administrator@dimcryro.onmicrosoft.com -MigrationType Hybrid
+
+### Analyze MailboxStatistics, from Exchange OnPremises, from a machine from external network:
+.\Analyze-MigrationLogs.ps1 -ConnectToExchangeOnPremises -ExchangeURL https://owa.dimcry.ro/PowerShell -AffectedUsers dtest5, dtest6, dtest2 -OnPremAdminAccount dimcry\dimcry
+
+### Analyze MailboxStatistics, from Exchange OnPremises, directly from a machine from internal network:
+.\Analyze-MigrationLogs.ps1 -ConnectToExchangeOnPremises -AffectedUsers dtest5, dtest6, dtest2
+#>
