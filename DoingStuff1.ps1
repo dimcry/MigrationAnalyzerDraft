@@ -523,11 +523,37 @@ function Build-TimeTrackerTable
 }
 
 
-$Data = Import-Clixml C:\1.xml
+function Calculate-LengthOfString {
+    param (
+        [string[]]
+        $TheStringToAnalyze
+    )
+    [int]$TheLengthOfString = 0
+    foreach ($Entry in $TheStringToAnalyze) {
+        if ([int]$($Entry.Length) -gt [int]$TheLengthOfString) {
+            $TheLengthOfString = $($Entry.Length)
+        }
+    }
+
+    return $TheLengthOfString
+}
+
+function Create-TheColumn {
+    param (
+        [string[]]
+        $TheValuesToList
+    )
+
+}
+
+
+<#
 $TheInfo = Create-MoveObject -MigrationLogs $LogEntry -TheEnvironment 'Exchange Online' -LogFrom FromFile -LogType FromFile -MigrationType Hybrid
-
 $MigrationUserStatistics = Import-Clixml C:\Temp\MigrationUserStatistics.xml
+#>
 
+
+$Data = Import-Clixml C:\1.xml
 $LogEntry = New-Object PSObject
 $LogEntry | Add-Member -NotePropertyName PrimarySMTPAddress -NotePropertyValue "FromFile"
 $LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $Data
@@ -538,10 +564,27 @@ foreach ($TimelineEntry in $($Entry.Timeline.timelineMonth)) {
     $TheDurationMilliseconds = $TheDurationMilliseconds + $($TimelineEntry.Milliseconds)
 }
 
-$timelineMonthSorted = $($Entry.Timeline.timelineMonth) | sort Milliseconds -Descending | select -First 3
+$Entry.Timeline.timelineMonth | ft -AutoSize
+
+$timelineMonthSorted = $($Entry.Timeline.timelineMonth) | sort Milliseconds -Descending | select -First 5
 $timelineMonthSorted | ft -AutoSize
+
+<#
+$title = "=== Mailbox migration analyzer ==="
+if (!($menuprompt)) 
+{
+    $menuprompt+="="*$title.Length
+}
+#>
+
+[int]$TheLengthOfStateName = Calculate-LengthOfString -TheStringToAnalyze $($timelineMonthSorted.State)
 Write-Host "The job was impacted mostly, by the following:" -ForegroundColor Green
+
+$timelineMonthSorted | select State, Milliseconds, @{Label='Percent'; Expression={(([int]$($_.Milliseconds)/[int]$TheDurationMilliseconds)*100).ToString("#.##")}} | ft -AutoSize
+
+
 foreach ($timelineMonthSortedEntry in $timelineMonthSorted) {
+    Write-Host 
     Write-Host "`t$($timelineMonthSortedEntry.State): " -ForegroundColor Cyan -NoNewline
     Write-Host "`t$($timelineMonthSortedEntry.Milliseconds)" -ForegroundColor White -NoNewline
     $ThePercent = (([int]$($timelineMonthSortedEntry.Milliseconds)/[int]$TheDurationMilliseconds)*100).ToString("#.##")
@@ -553,17 +596,23 @@ foreach ($timelineMonthSortedEntry in $timelineMonthSorted) {
 
 
 
+
 $TheInfo.GetType()
 $TheInfo | Get-Member
 
 
-$TheInfo.BasicInformation | select * -ExcludeProperty Failures
+$Entry.BasicInformation | select * -ExcludeProperty Failures
+foreach ($NewEntry in $($Entry.BasicInformation | Get-Member | where {$_.MemberType -eq "NoteProperty"})) {
+    Write-Host
+}
 $TheInfo.BadItemSummary
 $TheInfo.FailureStatistics
 $TheInfo.FailureSummary
 $TheInfo.LargeItemSummary
 $TheInfo.MailboxVerification
-$TheInfo.PerformanceStatistics
+$Entry.PerformanceStatistics
 $TheInfo.DetailsAboutTheMove
 # $TheInfo.Report
 # $TheInfo.DiagnosticInfo
+
+
