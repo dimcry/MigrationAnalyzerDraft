@@ -874,8 +874,6 @@ function Selected-ConnectToExchangeOnlineOption {
         [System.Collections.ArrayList]$PrimarySMTPAddresses = @()
         $TheRecipients = Find-TheRecipient -TheEnvironment 'Exchange Online' -TheAffectedUsers $AffectedUsers
         foreach ($Recipient in $TheRecipients) {
-            [string]$Path = $script:TheWorkingDirectorySavedData + "\Recipient_" + [string]$($Recipient.PrimarySMTPAddress) + ".xml"
-            $Recipient | Export-Clixml $Path
             $null = $PrimarySMTPAddresses.Add($($Recipient.PrimarySMTPAddress))
         }
 
@@ -2088,9 +2086,12 @@ function Find-TheRecipient {
     foreach ($User in $TheAffectedUsers) {
         $TheCommand = Create-CommandToInvoke -TheEnvironment $TheEnvironment -CommandFor "Recipient"
         try {
+            Write-Log ("[INFO] || Collecting `"Get-Recipient`" for `"$User`"")
             $Recipient = Invoke-Expression $($TheCommand.FullCommand)
             Write-Log "[INFO] || We were able to identify the recipient in $TheEnvironment for `"$User`".`n`tPrimarySmtpAddress:`t$($Recipient.PrimarySmtpAddress)`n`tExchangeGuid:`t`t$($Recipient.ExchangeGuid)`n`tRecipientType:`t`t$($Recipient.RecipientType)`n`tRecipientTypeDetails:`t$($Recipient.RecipientTypeDetails)"
             Write-Log "[INFO] || From now on, we will use its PrimarySMTPAddress, `"$($Recipient.PrimarySmtpAddress)`", when providing details about `"$User`""
+            [string]$Path = $script:TheWorkingDirectorySavedData + "\Recipient_" + [string]$($Recipient.PrimarySMTPAddress) + ".xml"
+            $Recipient | Export-Clixml $Path -Force
             $null = $Recipients.Add($Recipient)
         }
         catch {
