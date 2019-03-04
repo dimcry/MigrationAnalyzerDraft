@@ -170,6 +170,10 @@ Param(
 ################################################
 #region Functions, Global variables
 
+### ValidationForWorkingDirectory (Scope: Script) variable is used to validate if the Working Directory was created, or not
+[bool]$script:ValidationForWorkingDirectory = $true
+### TheWorkingDirectory (Scope: Script) variable is used to list the exact value for the Working Directory
+$script:TheWorkingDirectory = $null
 ### LogsToAnalyze (Scope: Script) variable will contain mailbox migration logs for all affected users
 [System.Collections.ArrayList]$script:LogsToAnalyze = @()
 ### ParsedLogs (Scope: Script) variable will contain parsed mailbox migration logs for all affected users
@@ -214,18 +218,18 @@ function Create-WorkingDirectory {
     ### Creating the Working directory in the desired format.
     if (-not (Test-Path $WorkingDirectory)) {
         try {
-            $void = New-Item -ItemType Directory -Force -Path $WorkingDirectory -ErrorAction Stop            
-            $WorkingDirectoryToUse = $WorkingDirectory
+            $null = New-Item -ItemType Directory -Force -Path $WorkingDirectory -ErrorAction Stop            
+            [string]$script:TheWorkingDirectory = $WorkingDirectory
         }
         catch {
             ### In case of error, we will retry to create the Working directory, for maximum 5 times.
             if ($NumberOfChecks -le 5) {
                 if (Test-Path $WorkingDirectory){
-                    $WorkingDirectoryToUse = $WorkingDirectory
+                    [string]$script:TheWorkingDirectory = $WorkingDirectory
                 }
                 else {
                     $NumberOfChecks++
-                    $WorkingDirectoryToUse = Create-WorkingDirectory -NumberOfChecks $NumberOfChecks    
+                    Create-WorkingDirectory -NumberOfChecks $NumberOfChecks    
                 }
             }
             ### In case we will not be able to create the Working directory even after 5 times, we will set the value of WorkingDirectoryToUse
@@ -257,32 +261,42 @@ function Create-WorkingDirectory {
         else {
             ### Doing 1-time effort to create the Working Directory in the location inserted from keyboard
             try {
-                $void = New-Item -ItemType Directory -Force -Path $WorkingDirectoryToUse -ErrorAction Stop            
+                $null = New-Item -ItemType Directory -Force -Path $WorkingDirectoryToUse -ErrorAction Stop
+                [string]$script:TheWorkingDirectory = $WorkingDirectoryToUse
             }
             catch {
                 ### In case of error, we will exit the script.
-                throw "We were unable to create the Working Directory under: $WorkingDirectoryToUse"
+                [bool]$script:ValidationForWorkingDirectory = $false
+                throw "We were unable to create the Working Directory: $WorkingDirectoryToUse"
             }
         }
     }
     ### We successfully created a Working Directory. We will set it as current path (Set-Location -Path $WorkingDirectoryToUse)
-    else {
+    if ($script:TheWorkingDirectory) {
         Write-Host
         Write-Host "We successfully created the following working directory:" -ForegroundColor Green
         Write-Host "`tFull path: " -ForegroundColor Cyan -NoNewline
-        Write-Host $WorkingDirectoryToUse -ForegroundColor White
+        Write-Host $script:TheWorkingDirectory -ForegroundColor White
         Write-Host "`tShort path: " -ForegroundColor Cyan -NoNewline
-        $TheShortPath = ($WorkingDirectoryToUse -split "MigrationAnalyzer")[1]
+        $TheShortPath = ($script:TheWorkingDirectory -split "MigrationAnalyzer")[1]
         Write-Host "`%temp`%\MigrationAnalyzer$TheShortPath" -ForegroundColor White
 
         # Keep track of the old location so we can restore it at the end
         $script:OriginalLocation = Get-Location
-        Set-Location -Path $WorkingDirectoryToUse
+        Set-Location -Path $script:TheWorkingDirectory
+        Create-LogFile -WorkingDirectory $script:TheWorkingDirectory
     }
 
-    ### Create-WorkingDirectory function will return the Path of the Working directory, or NotAbleToCreateTheWorkingDirectory in case
-    ### we were unable to create the Working directory.
-    return $WorkingDirectoryToUse
+    ### Doing 1-time effort to create the SavedData folder under the Working Directory
+    [string]$script:TheWorkingDirectorySavedData = $script:TheWorkingDirectory + "\SavedData"
+    try {
+        $void = New-Item -ItemType Directory -Force -Path $script:TheWorkingDirectorySavedData -ErrorAction Stop    
+        Write-Log ("[INFO] || We successfully created the SavedData folder: $script:TheWorkingDirectorySavedData")
+    }
+    catch {
+        ### In case of error, we will exit the script.
+        throw "We were unable to create the Working Directory under: $script:TheWorkingDirectorySavedData"
+    }
 }
 
 ### <summary>
@@ -860,12 +874,17 @@ function Selected-ConnectToExchangeOnlineOption {
         [System.Collections.ArrayList]$PrimarySMTPAddresses = @()
         $TheRecipients = Find-TheRecipient -TheEnvironment 'Exchange Online' -TheAffectedUsers $AffectedUsers
         foreach ($Recipient in $TheRecipients) {
+            [string]$Path = $script:TheWorkingDirectorySavedData + "\Recipient_" + [string]$($Recipient.PrimarySMTPAddress) + ".xml"
+            $Recipient | Export-Clixml $Path
             $null = $PrimarySMTPAddresses.Add($($Recipient.PrimarySMTPAddress))
         }
 
         [string]$TheAddresses = ""
         [int]$Counter = 0
-        if ($($PrimarySMTPAddresses.Count) -eq 1) {
+        if ($($PrimarySMTPAddresses.Count) -eq 0) {
+            throw "We were unable to find any valid SMTP Address to be used for further investigation"
+        }
+        elseif ($($PrimarySMTPAddresses.Count) -eq 1) {
             $TheAddresses = $PrimarySMTPAddresses[0]
         }
         elseif ($($PrimarySMTPAddresses.Count) -gt 1) {
@@ -1285,6 +1304,9 @@ function Selected-ConnectToExchangeOnPremisesOption {
         [string]$TheAddresses = ""
         [int]$Counter = 0
         if ($($PrimarySMTPAddresses.Count) -eq 1) {
+            throw "We were unable to find any valid SMTP Address to be used for further investigation"
+        }
+        elseif ($($PrimarySMTPAddresses.Count) -eq 1) {
             $TheAddresses = $PrimarySMTPAddresses[0]
         }
         elseif ($($PrimarySMTPAddresses.Count) -gt 1) {
@@ -2517,22 +2539,45 @@ Function New-BadItemSummary
 #utility function used to check if a specific command exists
 Function Test-CommandExists
 {
-    Param ($command)
+    Param (
+        [ValidateSet("Exchange Online", "Exchange OnPremises")]
+        [string]
+        $TheEnvironment,
+        [string]
+        $Command
+    )
 
     [bool]$result = $false 
 
     try
     {
-        Get-Command $command -EA:Stop
+        $null = Get-Command $Command -ErrorAction:Stop
         $result = $true
     }
     Catch
     {
-        Write-Error "$command does not exist"
+        if ($TheEnvironment -eq "Exchange Online") {
+            [string]$TheCommandToCheck = "Get-ManagementRole -Cmdlet " + $Command + "-ErrorAction:Stop"
+        }
+        elseif ($TheEnvironment -eq "Exchange OnPremises") {
+            [string]$TheCommandToCheck = "Get-" + $script:ExOnPremCommandsPrefix + "ManagementRole -Cmdlet " + $Command + "-ErrorAction:Stop"
+        }
+
+        try {
+            $ManagementRoles = Invoke-Expression $TheCommandToCheck
+        }
+        catch {
+            Write-Log "[ERROR] || You do not have permission to run `"$TheCommandToCheck`" or `"$Command`"" -ForegroundColor Red
+            throw ("Run the script again, using credentials of an user that is Global Administrator")
+        }
+                
+        #Write-Log "[ERROR] || You do not have permission to run `"$Command`"" -ForegroundColor Red
+        Write-Host "[ERROR] || You do not have permission to run `"$Command`"" -ForegroundColor Red
+        throw ("Run the script again, using credentials of an user that is part of one of the following Management Roles: `n$($ManagementRoles.Name)")
     }
 
-    $result
-} #end function test-CommandExists
+    return $result
+}
 
 
 function Build-TimeTrackerTable
@@ -2624,10 +2669,7 @@ try {
     Clear-Host
 
     $null = Show-Header
-
-    $script:TheWorkingDirectory = Create-WorkingDirectory -NumberOfChecks 1
-    Create-LogFile -WorkingDirectory $script:TheWorkingDirectory
-
+    Create-WorkingDirectory -NumberOfChecks 1
     Check-Parameters
 
     #region ForTestPurposes - This will be removed
