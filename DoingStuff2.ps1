@@ -1,118 +1,43 @@
-﻿# Add values to the object relevant to failed moves
-Function Add-BasicInformationFailed
-{
-    Param(
-        [Parameter(Mandatory = $true)]
-        $RequestStats,
+﻿cd "C:\Users\cristid\AppData\Local\Temp\MigrationAnalyzer\03042019_173206\SavedData"
+dir
 
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        [array]$BasicInformation
-    )
+$EXO_Recipient_Dtest2 = Import-Clixml .\EXO_Recipient_Dtest2@dimcry.ro.xml
+$EXO_Recipient_Dtest5 = Import-Clixml .\EXO_Recipient_Dtest5@dimcry.ro.xml
+$EXO_Recipient_Dtest6 = Import-Clixml .\EXO_Recipient_Dtest6@dimcry.ro.xml
 
-    BEGIN
-    {
-        # Build all properties to be added to the oubject
-        $Properties = [ordered]@{
-            FailureTimestamp    = $RequestStats.FailureTimestamp
-            FailureType         = $RequestStats.FailureType
-            FailureSide         = ([String]$RequestStats.FailureSide)
-        }
-    }
+$EXO_Recipient_Dtest2 | ft -AutoSize *Move*
+$EXO_Recipient_Dtest5 | ft -AutoSize *Move*
+$EXO_Recipient_Dtest6 | ft -AutoSize *Move*
 
-    PROCESS
-    {
-        foreach ($info in $BasicInformation)
-        {
-            # Add them to the object
-            $info | Add-Member -NotePropertyMembers $Properties
-        }
-    }
+cd "C:\Temp\MSSupport"
+dir
+$Recipient_Hybrid11 = Import-Clixml .\Recipient_Hybrid11@dimcry.ro.xml
+$Recipient_Hybrid11 | ft -AutoSize *Move*
+$Recipient_Hybrid4 = Import-Clixml .\Recipient_Hybrid4@dimcry.ro.xml
+$Recipient_Hybrid4 | ft -AutoSize *Move*
+$Recipient_T1 = Import-Clixml .\Recipient_T1@dimcry.ro.xml
+$Recipient_T1 | ft -AutoSize *Move*
+
+
+
+if (($($Recipient_Hybrid11.MailboxMoveStatus) -ne "None") -and ($($Recipient_Hybrid11.MailboxMoveFlags) -ne "None") -and ($($Recipient_Hybrid11.MailboxMoveTargetMDB) -or ($($Recipient_Hybrid11.MailboxMoveSourceMDB)))) {
+    Write-host "Move in progress" -ForegroundColor Green
+}
+else {
+    Write-host "No move in progress" -ForegroundColor Red
+}
+
+if (($($EXO_Recipient_Dtest2.MailboxMoveStatus) -ne "None") -and ($($EXO_Recipient_Dtest2.MailboxMoveFlags) -ne "None") -and ($($EXO_Recipient_Dtest2.MailboxMoveTargetMDB) -or ($($EXO_Recipient_Dtest2.MailboxMoveSourceMDB)))) {
+    Write-host "Move in progress" -ForegroundColor Green
+}
+else {
+    Write-host "No move in progress" -ForegroundColor Red
 }
 
 
-Function Add-BasicInformationComplete
-{
-    Param(
-        [Parameter(Mandatory = $true)]
-        $RequestStats,
-
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        [array]$BasicInformation
-    )
-
-    BEGIN
-    {
-        $SourceMailboxSizeBytes = $null
-        $RequestStats.report.sourcemailboxsize | Select-Object *size | Get-Member -MemberType noteproperty | foreach { $SourceMailboxSizeBytes = $SourceMailboxSizeBytes + $RequestStats.Report.SourceMailboxsize.($_.name) }
-
-        $TargetMailboxSizeBytes = $null
-        $RequestStats.report.targetmailboxsize | Select-Object *size | Get-Member -MemberType noteproperty | foreach { $TargetMailboxSizeBytes = $TargetMailboxSizeBytes + $RequestStats.Report.Targetmailboxsize.($_.name) }
-
-        $Properties = [ordered]@{
-            SourceMailboxSizeGB = $SourceMailboxSizeBytes / 1GB
-            TargetMailboxSizeGB = $TargetMailboxSizeBytes / 1GB
-            PercentMailboxBloat = (($TargetMailboxSizeBytes - $SourceMailboxSizeBytes) / $SourceMailboxSizeBytes) * 100
-        }
-    }
-
-    PROCESS
-    {
-        foreach ($info in $BasicInformation)
-        {
-            # Add the properties to the object
-            $info | Add-Member -NotePropertyMembers $Properties
-        }
-    }
+if ($($EXO_Recipient_Dtest2.MailboxMoveTargetMDB) -or ($($EXO_Recipient_Dtest2.MailboxMoveSourceMDB))) {
+    Write-host "Move in progress" -ForegroundColor Green
 }
-
-# Create the Basic Information object and populate it with the baseline values
-Function New-BasicInformation
-{
-    Param(
-        [Parameter(Mandatory = $true)]
-        $RequestStats
-    )
-
-    # Build all properties to be added to the oubject
-    New-Object PSObject -Property ([ordered]@{
-        Alias           = $RequestStats.Alias 
-        ExchangeGuid    = $RequestStats.ExchangeGuid
-        Created         = $RequestStats.QueuedTimestamp
-        Completed       = $RequestStats.CompletionTimeStamp
-        Failed          = $RequestStats.FailureTimeStamp
-        Direction       = ([String]$RequestStats.Direction)
-        Status          = ([String]$RequestStats.Status)
-        StatusDetail    = ([String]$RequestStats.StatusDetail)
-        Workload        = ([String]$RequestStats.Workloadtype)
-        Flags           = ([String]$RequestStats.Flags)
-        SourceServer    = $RequestStats.SourceServer
-        SourceVersion   = $RequestStats.SourceVersion
-        SourceDatabase  = $RequestStats.SourceDatabase
-        TargetServer    = $RequestStats.TargetServer
-        TargetVersion   = $RequestStats.TargetVersion
-        TargetDatabase  = $RequestStats.TargetDatabase
-        MRSProxy        = $RequestStats.RemoteHostName
-        RemoteDatabase  = $RequestStats.RemoteDatabaseName
-        Protected       = $RequestStats.Protect
-        BadItemLimit    = ([int][String]$RequestStats.BadItemLimit)
-        LargeItemLimit  = ([int][String]$RequestStats.LargeItemLimit)
-        Failures        = $RequestStats.Report.Failures
-        BadItems        = $RequestStats.Report.BadItems
-        LargeItems      = $RequestStats.Report.LargeItems
-    })
+else {
+    Write-host "No move in progress" -ForegroundColor Red
 }
-
-
-    # List of fields to output
-    [Array]$OrderedFields = "BasicInformation","PerformanceStatistics","FailureSummary","FailureStatistics","LargeItemSummary","BadItemSummary","MailboxVerification"
-
-    # Create the Result object that will be used to store all results
-    $MoveAnalysis = New-Object PSObject
-    $OrderedFields | foreach { $MoveAnalysis | Add-Member -Name $_ -Value $null -MemberType NoteProperty  }
-
-    # Pull everything that we need that is common to all status types
-    $MoveAnalysis.BasicInformation        = New-BasicInformation -RequestStats $MigrationLogs
-
-    $MigrationLogs = Import-Clixml C:\1.xml
-
-    Add-BasicInformationFailed -RequestStats $MigrationLogs -BasicInformation $MoveAnalysis.BasicInformation

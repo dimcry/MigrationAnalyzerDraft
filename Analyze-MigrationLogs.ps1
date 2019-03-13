@@ -1089,6 +1089,8 @@ function Collect-MigrationLogs {
         foreach ($Log in $TheMigrationLogs) {
             $LogEntry = New-Object PSObject
             $LogEntry | Add-Member -NotePropertyName PrimarySMTPAddress -NotePropertyValue "FromFile"
+            $LogEntry | Add-Member -NotePropertyName MigrationType -NotePropertyValue "FromFile"
+            $LogEntry | Add-Member -NotePropertyName LogType -NotePropertyValue "FromFile"
             $LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $Log
             $void = $script:LogsToAnalyze.Add($LogEntry)
         }
@@ -1098,17 +1100,13 @@ function Collect-MigrationLogs {
         #Write-Host "This part is not yet implemented" -ForegroundColor Red
 
         if ($MigrationType -eq "Hybrid") {
-            Write-Log ("[INFO] || Collecting Get-MoveRequestStatistics for each Affected users")
-            $TheCommand = Create-CommandToInvoke -TheEnvironment 'Exchange Online' -CommandFor "MoveRequestStatistics"
-            if ($($TheCommand.Command)) {
-                try {
-                    $null = Get-Command $($TheCommand.Command) -ErrorAction Stop
-                    Collect-MoveRequestStatistics -AffectedUsers $AffectedUsers -TheCommand $TheCommand
-                }
-                catch {
-                    Write-Log "[ERROR] || You do not have permissions to run `"$($TheCommand.Command)`" command." -ForegroundColor Red
-                }
-            }
+            Collect-MoveRequestStatistics -AffectedUsers $AffectedUsers
+        }
+        elseif ($MigrationType -eq "IMAP") {
+            Collect-SyncRequestStatistics -AffectedUsers $AffectedUsers
+        }
+        elseif (($MigrationType -eq "Cutover") -or ($MigrationType -eq "Staged")) {
+            Collect-MigrationUserStatistics -AffectedUsers $AffectedUsers
         }
     }
     elseif ($ConnectToExchangeOnPremises) {
@@ -1131,22 +1129,37 @@ function Collect-MigrationLogs {
 function Collect-MoveRequestStatistics {
     param (
         [string[]]
-        $AffectedUsers,
-        $TheCommand
+        $AffectedUsers
     )
 
-    foreach ($User in $AffectedUsers) {
-        try {
-            Write-Log ("[INFO] || Running the following command:`n`t$($TheCommand.FullCommand.Replace("`$User", "$User"))")
-            $MoveRequestStatistics = Invoke-Expression $($TheCommand.FullCommand)
-            Write-Log "[INFO] || MoveRequestStatistics successfully collected for `"$User`" user."
-            $LogEntry = New-Object PSObject
-            $LogEntry | Add-Member -NotePropertyName PrimarySMTPAddress -NotePropertyValue $User
-            $LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $MoveRequestStatistics
-            $void = $script:LogsToAnalyze.Add($LogEntry)
-        }
-        catch {
-            Write-Log "[ERROR] || We were unable to collect MoveRequestStatistics for `"$User`" user." -ForegroundColor Red
+    Write-Log ("[INFO] || Collecting Get-MoveRequestStatistics for each Affected users")
+    $TheCommand = Create-CommandToInvoke -TheEnvironment 'Exchange Online' -CommandFor "MoveRequestStatistics"
+
+    if ($($TheCommand.Command)) {
+        foreach ($User in $AffectedUsers) {
+            try {
+                $null = Get-Command $($TheCommand.Command) -ErrorAction Stop
+                Write-Log ("[INFO] || Running the following command:`n`t$($TheCommand.FullCommand.Replace("`$User", "$User"))")
+                try {
+                    $ExpressionResults = Invoke-Expression $($TheCommand.FullCommand)
+                    Write-Log "[INFO] || MoveRequestStatistics successfully collected for `"$User`" user."
+                    $LogEntry = New-Object PSObject
+                    $LogEntry | Add-Member -NotePropertyName PrimarySMTPAddress -NotePropertyValue $User
+                    $LogEntry | Add-Member -NotePropertyName MigrationType -NotePropertyValue "Hybrid"
+                    $LogEntry | Add-Member -NotePropertyName LogType -NotePropertyValue "MoveRequestStatistics"
+                    $LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $ExpressionResults
+                    $void = $script:LogsToAnalyze.Add($LogEntry)
+                    [string]$Path = $script:TheWorkingDirectorySavedData + "\EXO_MoveRequestStatistics_" + [string]$User + ".xml"
+                    $LogEntry | Export-Clixml $Path -Force
+                }
+                catch {
+                    Write-Log "[ERROR] || We were unable to collect MoveRequestStatistics for `"$User`" user." -ForegroundColor Red
+                }
+            }
+            catch {                
+                Write-Log "[ERROR] || You do not have permissions to run `"$($TheCommand.Command)`" command." -ForegroundColor Red
+                Collect-MoveRequest -AffectedUsers $AffectedUsers
+            }
         }
     }
 }
@@ -1248,11 +1261,13 @@ function Collect-MailboxStatistics {
     foreach ($User in $AffectedUsers) {
         try {
             Write-Log ("[INFO] || Running the following command:`n`t$($TheCommand.FullCommand.Replace("`$User", "$User"))")
-            $MailboxStatistics = Invoke-Expression $($TheCommand.FullCommand)
+            $ExpressionResults = Invoke-Expression $($TheCommand.FullCommand)
             Write-Log "[INFO] || MoveHistory successfully collected for `"$User`" user."
             $LogEntry = New-Object PSObject
             $LogEntry | Add-Member -NotePropertyName PrimarySMTPAddress -NotePropertyValue $User
-            $LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $MailboxStatistics
+            $LogEntry | Add-Member -NotePropertyName MigrationType -NotePropertyValue "Hybrid"
+            $LogEntry | Add-Member -NotePropertyName LogType -NotePropertyValue "MailboxStatistics"
+            $LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $ExpressionResults
             $void = $script:LogsToAnalyze.Add($LogEntry)
         }
         catch {
@@ -1301,7 +1316,7 @@ function Selected-ConnectToExchangeOnPremisesOption {
 
         [string]$TheAddresses = ""
         [int]$Counter = 0
-        if ($($PrimarySMTPAddresses.Count) -eq 1) {
+        if ($($PrimarySMTPAddresses.Count) -eq 0) {
             throw "We were unable to find any valid SMTP Address to be used for further investigation"
         }
         elseif ($($PrimarySMTPAddresses.Count) -eq 1) {
@@ -2027,20 +2042,20 @@ function Extract-CorrectListOfUsersForMailboxStatistics {
             else {
                 [string]$TheCommand = "Get-Recipient `$User -ResultSize Unlimited -ErrorAction Stop"
             }
-            $GetRecipient = Invoke-Expression $TheCommand
+            $ExpressionResults = Invoke-Expression $TheCommand
             Write-Log ("[INFO] || $User user is an UserMailbox in $TheEnvironment")
-            Write-Log ("[INFO] || Details about the user:`n`tUserPrincipalName: $($GetUser.UserPrincipalName)`n`tSamAccountName: $($GetUser.SamAccountName)`n`tOrganizationalUnit: $($GetUser.OrganizationalUnit)`n`tDistinguishedName: $($GetUser.DistinguishedName)`n`tGuid: $($GetUser.Guid)`n`tRecipientTypeDetails: $($GetUser.RecipientTypeDetails)") -NonInteractive $true
+            Write-Log ("[INFO] || Details about the user:`n`tUserPrincipalName: $($ExpressionResults.UserPrincipalName)`n`tSamAccountName: $($ExpressionResults.SamAccountName)`n`tOrganizationalUnit: $($ExpressionResults.OrganizationalUnit)`n`tDistinguishedName: $($ExpressionResults.DistinguishedName)`n`tGuid: $($ExpressionResults.Guid)`n`tRecipientTypeDetails: $($ExpressionResults.RecipientTypeDetails)") -NonInteractive $true
             Write-Host "Details about the user:" -ForegroundColor Green
             Write-Host "`tPrimarySMTPAddress: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetRecipient.PrimarySMTPAddress)" -ForegroundColor White
+            Write-Host "$($ExpressionResults.PrimarySMTPAddress)" -ForegroundColor White
             Write-Host "`tOrganizationalUnit: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetRecipient.OrganizationalUnit)" -ForegroundColor White
+            Write-Host "$($ExpressionResults.OrganizationalUnit)" -ForegroundColor White
             Write-Host "`tDistinguishedName: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetRecipient.DistinguishedName)" -ForegroundColor White
+            Write-Host "$($ExpressionResults.DistinguishedName)" -ForegroundColor White
             Write-Host "`tGuid: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetRecipient.Guid)" -ForegroundColor White
+            Write-Host "$($ExpressionResults.Guid)" -ForegroundColor White
             Write-Host "`tRecipientTypeDetails: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($GetRecipient.RecipientTypeDetails)" -ForegroundColor White
+            Write-Host "$($ExpressionResults.RecipientTypeDetails)" -ForegroundColor White
             Write-Host
 
             Write-Log ("[INFO] || Adding $User user to the UsersOK variable")
@@ -2087,12 +2102,17 @@ function Find-TheRecipient {
         $TheCommand = Create-CommandToInvoke -TheEnvironment $TheEnvironment -CommandFor "Recipient"
         try {
             Write-Log ("[INFO] || Collecting `"Get-Recipient`" for `"$User`"")
-            $Recipient = Invoke-Expression $($TheCommand.FullCommand)
-            Write-Log "[INFO] || We were able to identify the recipient in $TheEnvironment for `"$User`".`n`tPrimarySmtpAddress:`t$($Recipient.PrimarySmtpAddress)`n`tExchangeGuid:`t`t$($Recipient.ExchangeGuid)`n`tRecipientType:`t`t$($Recipient.RecipientType)`n`tRecipientTypeDetails:`t$($Recipient.RecipientTypeDetails)"
-            Write-Log "[INFO] || From now on, we will use its PrimarySMTPAddress, `"$($Recipient.PrimarySmtpAddress)`", when providing details about `"$User`""
-            [string]$Path = $script:TheWorkingDirectorySavedData + "\Recipient_" + [string]$($Recipient.PrimarySMTPAddress) + ".xml"
-            $Recipient | Export-Clixml $Path -Force
-            $null = $Recipients.Add($Recipient)
+            $ExpressionResults = Invoke-Expression $($TheCommand.FullCommand)
+            Write-Log "[INFO] || We were able to identify the recipient in $TheEnvironment for `"$User`".`n`tPrimarySmtpAddress:`t$($ExpressionResults.PrimarySmtpAddress)`n`tExchangeGuid:`t`t$($ExpressionResults.ExchangeGuid)`n`tRecipientType:`t`t$($ExpressionResults.RecipientType)`n`tRecipientTypeDetails:`t$($ExpressionResults.RecipientTypeDetails)"
+            Write-Log "[INFO] || From now on, we will use its PrimarySMTPAddress, `"$($ExpressionResults.PrimarySmtpAddress)`", when providing details about `"$User`""
+            if ($TheEnvironment -eq "Exchange Online") {
+                [string]$Path = $script:TheWorkingDirectorySavedData + "\EXO_Recipient_" + [string]$($ExpressionResults.PrimarySMTPAddress) + ".xml"
+            }
+            elseif ($TheEnvironment -eq "Exchange OnPremises") {
+                [string]$Path = $script:TheWorkingDirectorySavedData + "\OnPrem_Recipient_" + [string]$($ExpressionResults.PrimarySMTPAddress) + ".xml"
+            }
+            $ExpressionResults | Export-Clixml $Path -Force
+            $null = $Recipients.Add($ExpressionResults)
         }
         catch {
             Write-Log "[ERROR] || Unable to identify the Recipient using information you provided (`"$User`")" -ForegroundColor Red
@@ -2565,7 +2585,7 @@ Function Test-CommandExists
         }
 
         try {
-            $ManagementRoles = Invoke-Expression $TheCommandToCheck
+            $ExpressionResults = Invoke-Expression $TheCommandToCheck
         }
         catch {
             Write-Log "[ERROR] || You do not have permission to run `"$TheCommandToCheck`" or `"$Command`"" -ForegroundColor Red
@@ -2574,7 +2594,7 @@ Function Test-CommandExists
                 
         #Write-Log "[ERROR] || You do not have permission to run `"$Command`"" -ForegroundColor Red
         Write-Host "[ERROR] || You do not have permission to run `"$Command`"" -ForegroundColor Red
-        throw ("Run the script again, using credentials of an user that is part of one of the following Management Roles: `n$($ManagementRoles.Name)")
+        throw ("Run the script again, using credentials of an user that is part of one of the following Management Roles: `n$($ExpressionResults.Name)")
     }
 
     return $result
@@ -2708,6 +2728,40 @@ try {
             Write-Host
         }
 
+        if ($($Entry.Timeline.timelineMinute)) {
+            Write-Host "Details about timeline, by minute: " -ForegroundColor Cyan
+            $TheEntriesToDisplay = $($Entry.Timeline.timelineMinute)
+            $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 5 | ft -AutoSize
+            $TheSortedEntriesToDisplay = $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 50
+            Write-Log ("Details about timeline, by month: `n$TheSortedEntriesToDisplay") -NonInteractive $true
+            Write-Host
+        }
+
+        if ($($Entry.Timeline.timelineHour)) {
+            Write-Host "Details about timeline, by hour: " -ForegroundColor Cyan
+            $TheEntriesToDisplay = $($Entry.Timeline.timelineHour)
+            $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 5 | ft -AutoSize
+            $TheSortedEntriesToDisplay = $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 50
+            Write-Log ("Details about timeline, by month: `n$TheSortedEntriesToDisplay") -NonInteractive $true
+            Write-Host
+        }
+
+        if ($($Entry.Timeline.timelineDay)) {
+            Write-Host "Details about timeline, by Day: " -ForegroundColor Cyan
+            $TheEntriesToDisplay = $($Entry.Timeline.timelineDay)
+            $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 5 | ft -AutoSize
+            <#foreach ($timelineMonthSortedEntry in $TheEntriesToDisplay) {
+                Write-Host 
+                Write-Host "`t$($timelineMonthSortedEntry.State): " -ForegroundColor Cyan -NoNewline
+                Write-Host "`t$($timelineMonthSortedEntry.Milliseconds)" -ForegroundColor White -NoNewline
+                $ThePercent = (([int]$($timelineMonthSortedEntry.Milliseconds)/[int]$TheDurationMilliseconds)*100).ToString("#.##")
+                Write-Host " ($ThePercent `%)"
+            }#>
+            $TheSortedEntriesToDisplay = $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 50
+            Write-Log ("Details about timeline, by month: `n$TheSortedEntriesToDisplay") -NonInteractive $true
+            Write-Host
+        }
+
         if ($($Entry.Timeline.timelineMonth)) {
             Write-Host "Details about timeline, by month: " -ForegroundColor Cyan
             $TheEntriesToDisplay = $($Entry.Timeline.timelineMonth)
@@ -2719,7 +2773,7 @@ try {
                 $ThePercent = (([int]$($timelineMonthSortedEntry.Milliseconds)/[int]$TheDurationMilliseconds)*100).ToString("#.##")
                 Write-Host " ($ThePercent `%)"
             }#>
-            $TheSortedEntriesToDisplay = $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 5
+            $TheSortedEntriesToDisplay = $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 50
             Write-Log ("Details about timeline, by month: `n$TheSortedEntriesToDisplay") -NonInteractive $true
             Write-Host
         }
