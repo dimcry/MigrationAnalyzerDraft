@@ -624,3 +624,5 @@ Function Write-Log {
 }
 
 ConnectTo-ExchangeOnPremises -ExchangeURL https://owa.dimcry.ro/PowerShell
+
+# Florin
