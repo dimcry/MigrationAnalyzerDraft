@@ -118,49 +118,7 @@ D.    Resource estimates:
 #region Parameters
 Param(
     [Parameter(ParameterSetName = "FilePath", Mandatory = $false)]
-    [String]$FilePath = $null,
-
-    [Parameter(ParameterSetName = "ConnectToExchangeOnline", Mandatory = $true)]
-    [switch]$ConnectToExchangeOnline,
-
-    [Parameter(ParameterSetName = "ConnectToExchangeOnPremises", Mandatory = $true)]
-    [switch]$ConnectToExchangeOnPremises,
-
-    [Parameter(ParameterSetName = "ConnectToExchangeOnline", Mandatory = $false)]
-    [Parameter(ParameterSetName = "ConnectToExchangeOnPremises", Mandatory = $false)]
-    [string[]]$AffectedUsers,
-    
-    [Parameter(ParameterSetName = "ConnectToExchangeOnline", Mandatory = $false)]
-    [ValidateSet("Hybrid", "IMAP", "Cutover", "Staged")]
-    [string]$MigrationType,
-
-    [Parameter(ParameterSetName = "ConnectToExchangeOnline", Mandatory = $false)]
-    [string]$EXOAdminAccount,
-
-    [Parameter(ParameterSetName = "ConnectToExchangeOnPremises", Mandatory = $false)]
-    [string]$OnPremAdminAccount,
-
-    [Parameter(Mandatory=$false,
-        ParameterSetName='ConnectToExchangeOnPremises')]
-    [ValidateNotNullOrEmpty()]
-    [ValidateScript({$_ -match "[htp]{4}"})] 
-    [string]$ExchangeURL,
-
-    [Parameter(Mandatory=$false,
-        ParameterSetName='ConnectToExchangeOnPremises')]
-    [ValidateNotNullOrEmpty()]
-    [ValidateSet("Basic","Digest","Negotiate","Kerberos")]
-    [string]$AuthenticationType,
-
-    [Parameter(Mandatory=$false,
-        ParameterSetName='ConnectToExchangeOnPremises')]
-    [ValidateNotNullOrEmpty()]
-    [string]$Domain = "getdomain",
-
-    [Parameter(Mandatory=$false,
-        ParameterSetName='ConnectToExchangeOnPremises')]
-    [ValidateNotNullOrEmpty()]
-    [string]$ADSite = "getsite"
+    [String]$FilePath = $null
 )
 
 #endregion Parameters
@@ -232,45 +190,40 @@ function Create-WorkingDirectory {
                     Create-WorkingDirectory -NumberOfChecks $NumberOfChecks    
                 }
             }
-            ### In case we will not be able to create the Working directory even after 5 times, we will set the value of WorkingDirectoryToUse
-            ### variable to NotAbleToCreateTheWorkingDirectory.
+            ### In case we will not be able to create the Working directory even after 5 times, the script will ask to
+            ### insert, from the keyboard, the path where it can be created.
             else {
-                $WorkingDirectoryToUse = "NotAbleToCreateTheWorkingDirectory"
+                Write-Host
+                Write-Host "We were unable to create the working directory with " -ForegroundColor Red -NoNewline
+                Write-Host "`"<MMddyyyy_HHmmss>`"" -ForegroundColor White -NoNewline
+                Write-Host " format, under " -ForegroundColor Red -NoNewline
+                Write-Host "`"%temp%\MigrationAnalyzer\`"" -ForegroundColor White
+                Write-Host
+                Write-Host "Please provide a location on which you have permissions to create folders/files." -ForegroundColor Cyan
+                Write-Host "In it, we will log the actions the script will take." -ForegroundColor Cyan
+                Write-Host "`tPath: " -ForegroundColor Cyan -NoNewline
+                $WorkingDirectoryToUse = Read-Host
+            
+                ### If entered value will be empty, the script will exit.
+                if (-not ($WorkingDirectoryToUse)) {
+                    throw "No valid path was provided."
+                }
+                else {
+                    ### Doing 1-time effort to create the Working Directory in the location inserted from keyboard
+                    try {
+                        $null = New-Item -ItemType Directory -Force -Path $WorkingDirectoryToUse -ErrorAction Stop
+                        [string]$script:TheWorkingDirectory = $WorkingDirectoryToUse
+                    }
+                    catch {
+                        ### In case of error, we will exit the script.
+                        [bool]$script:ValidationForWorkingDirectory = $false
+                        throw "We were unable to create the Working Directory: $WorkingDirectoryToUse"
+                    }
+                }
             }
         }
     }
 
-    ### Checking if we were able to create the Working Directory in the desired location. If not, we will ask to insert the path where it can be created,
-    ### from the keyboard.
-    if ($WorkingDirectoryToUse -eq "NotAbleToCreateTheWorkingDirectory") {
-        Write-Host
-        Write-Host "We were unable to create the working directory with " -ForegroundColor Red -NoNewline
-        Write-Host "`"<MMddyyyy_HHmmss>`"" -ForegroundColor White -NoNewline
-        Write-Host " format, under " -ForegroundColor Red -NoNewline
-        Write-Host "`"%temp%\MigrationAnalyzer\`"" -ForegroundColor White
-        Write-Host
-        Write-Host "Please provide a location on which you have permissions to create folders/files." -ForegroundColor Cyan
-        Write-Host "In it we will log the actions the script will take." -ForegroundColor Cyan
-        Write-Host "`tPath: " -ForegroundColor Cyan -NoNewline
-        $WorkingDirectoryToUse = Read-Host
-    
-        ### If entered value will be empty, the script will exit.
-        if (-not ($WorkingDirectoryToUse)) {
-            throw "No valid path was provided."
-        }
-        else {
-            ### Doing 1-time effort to create the Working Directory in the location inserted from keyboard
-            try {
-                $null = New-Item -ItemType Directory -Force -Path $WorkingDirectoryToUse -ErrorAction Stop
-                [string]$script:TheWorkingDirectory = $WorkingDirectoryToUse
-            }
-            catch {
-                ### In case of error, we will exit the script.
-                [bool]$script:ValidationForWorkingDirectory = $false
-                throw "We were unable to create the Working Directory: $WorkingDirectoryToUse"
-            }
-        }
-    }
     ### We successfully created a Working Directory. We will set it as current path (Set-Location -Path $WorkingDirectoryToUse)
     if ($script:TheWorkingDirectory) {
         Write-Host
@@ -290,7 +243,7 @@ function Create-WorkingDirectory {
     ### Doing 1-time effort to create the SavedData folder under the Working Directory
     [string]$script:TheWorkingDirectorySavedData = $script:TheWorkingDirectory + "\SavedData"
     try {
-        $void = New-Item -ItemType Directory -Force -Path $script:TheWorkingDirectorySavedData -ErrorAction Stop    
+        $null = New-Item -ItemType Directory -Force -Path $script:TheWorkingDirectorySavedData -ErrorAction Stop    
         Write-Log ("[INFO] || We successfully created the SavedData folder: $script:TheWorkingDirectorySavedData")
     }
     catch {
@@ -362,7 +315,7 @@ function Create-LogFile {
 
     try {
         ### Creating the LogFile.
-        $void = New-Item -ItemType "file" -Path "$script:LogFile" -Force -ErrorAction Stop
+        $null = New-Item -ItemType "file" -Path "$script:LogFile" -Force -ErrorAction Stop
     }
     catch {
         ### In case of error, the script will exit.
@@ -1092,7 +1045,7 @@ function Collect-MigrationLogs {
             $LogEntry | Add-Member -NotePropertyName MigrationType -NotePropertyValue "FromFile"
             $LogEntry | Add-Member -NotePropertyName LogType -NotePropertyValue "FromFile"
             $LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $Log
-            $void = $script:LogsToAnalyze.Add($LogEntry)
+            $null = $script:LogsToAnalyze.Add($LogEntry)
         }
     }
     elseif ($ConnectToExchangeOnline) {
@@ -1148,7 +1101,7 @@ function Collect-MoveRequestStatistics {
                     $LogEntry | Add-Member -NotePropertyName MigrationType -NotePropertyValue "Hybrid"
                     $LogEntry | Add-Member -NotePropertyName LogType -NotePropertyValue "MoveRequestStatistics"
                     $LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $ExpressionResults
-                    $void = $script:LogsToAnalyze.Add($LogEntry)
+                    $null = $script:LogsToAnalyze.Add($LogEntry)
                     [string]$Path = $script:TheWorkingDirectorySavedData + "\EXO_MoveRequestStatistics_" + [string]$User + ".xml"
                     $LogEntry | Export-Clixml $Path -Force
                 }
@@ -1268,7 +1221,7 @@ function Collect-MailboxStatistics {
             $LogEntry | Add-Member -NotePropertyName MigrationType -NotePropertyValue "Hybrid"
             $LogEntry | Add-Member -NotePropertyName LogType -NotePropertyValue "MailboxStatistics"
             $LogEntry | Add-Member -NotePropertyName Logs -NotePropertyValue $ExpressionResults
-            $void = $script:LogsToAnalyze.Add($LogEntry)
+            $null = $script:LogsToAnalyze.Add($LogEntry)
         }
         catch {
             Write-Log "[ERROR] || We were unable to collect MoveHistory from MailboxStatistics for `"$User`" user."
@@ -2061,12 +2014,12 @@ function Extract-CorrectListOfUsersForMailboxStatistics {
             Write-Log ("[INFO] || Adding $User user to the UsersOK variable")
 
             ### If found, added to the UsersOK list
-            $void = $UsersOK.Add($User)
+            $null = $UsersOK.Add($User)
         }
         catch {
             ### If not found, added to the UsersNotOK list
             Write-Log ("[WARNING] || Adding $User user to the UsersNotOK variable") -ForegroundColor Yellow
-            $void = $UsersNotOK.Add($User)
+            $null = $UsersNotOK.Add($User)
         }
     }
 
@@ -2750,13 +2703,6 @@ try {
             Write-Host "Details about timeline, by Day: " -ForegroundColor Cyan
             $TheEntriesToDisplay = $($Entry.Timeline.timelineDay)
             $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 5 | ft -AutoSize
-            <#foreach ($timelineMonthSortedEntry in $TheEntriesToDisplay) {
-                Write-Host 
-                Write-Host "`t$($timelineMonthSortedEntry.State): " -ForegroundColor Cyan -NoNewline
-                Write-Host "`t$($timelineMonthSortedEntry.Milliseconds)" -ForegroundColor White -NoNewline
-                $ThePercent = (([int]$($timelineMonthSortedEntry.Milliseconds)/[int]$TheDurationMilliseconds)*100).ToString("#.##")
-                Write-Host " ($ThePercent `%)"
-            }#>
             $TheSortedEntriesToDisplay = $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 50
             Write-Log ("Details about timeline, by month: `n$TheSortedEntriesToDisplay") -NonInteractive $true
             Write-Host
@@ -2766,13 +2712,6 @@ try {
             Write-Host "Details about timeline, by month: " -ForegroundColor Cyan
             $TheEntriesToDisplay = $($Entry.Timeline.timelineMonth)
             $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 5 | ft -AutoSize
-            <#foreach ($timelineMonthSortedEntry in $TheEntriesToDisplay) {
-                Write-Host 
-                Write-Host "`t$($timelineMonthSortedEntry.State): " -ForegroundColor Cyan -NoNewline
-                Write-Host "`t$($timelineMonthSortedEntry.Milliseconds)" -ForegroundColor White -NoNewline
-                $ThePercent = (([int]$($timelineMonthSortedEntry.Milliseconds)/[int]$TheDurationMilliseconds)*100).ToString("#.##")
-                Write-Host " ($ThePercent `%)"
-            }#>
             $TheSortedEntriesToDisplay = $TheEntriesToDisplay | sort Milliseconds -Descending | select -First 50
             Write-Log ("Details about timeline, by month: `n$TheSortedEntriesToDisplay") -NonInteractive $true
             Write-Host
@@ -2780,40 +2719,8 @@ try {
 
         Write-Host
     }
-
-    <#
-    foreach ($Entry in $script:LogsToAnalyze) {
-        if ($($Entry.PrimarySMTPAddress) -eq "FromFile")
-        {
-            Write-Log "[INFO] || Providing details of the migration from the file you provided"
-        }
-        else {
-            Write-Log "[INFO] || Providing details of the migration for $($Entry.PrimarySMTPAddress)"
-        }
-
-        if ($($Entry.Logs.MailboxIdentity.Name)) {
-            Write-Host "`tName: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($Entry.Logs.MailboxIdentity.Name)" -ForegroundColor White
-        }
-        if ($([string]$Entry.Logs.Status)) {
-            Write-Host "`tStatus: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$([string]$Entry.Logs.Status)" -ForegroundColor White
-        }
-        if ($([string]$Entry.Logs.StatusDetail)) {
-            Write-Host "`tStatusDetails: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$([string]$Entry.Logs.StatusDetail)" -ForegroundColor White
-        }
-        if ($([string]$Entry.Logs.ExchangeGuid)) {
-            Write-Host "`tExchangeGuid: " -ForegroundColor Cyan -NoNewline
-            Write-Host "$([string]$Entry.Logs.ExchangeGuid)" -ForegroundColor White
-        }
-        Write-Host
-    }
-    #>
-    #endregion ForTestPurposes
-
-    #Show-Menu
-} catch {
+} 
+catch {
     Write-Log "[ERROR] || $_" -ForegroundColor Red
     Write-Log "[ERROR] || Script will now exit" -ForegroundColor Red
 }
