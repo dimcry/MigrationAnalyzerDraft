@@ -548,9 +548,9 @@ function Create-MoveObject {
     # Pull everything that we need that is common to all status types
 
     $MoveAnalysis.BasicInformation        = New-BasicInformation -RequestStats $($MigrationLogs.Logs)
-<#
     $MoveAnalysis.PerformanceStatistics   = New-PerformanceStatistics -RequestStats $($MigrationLogs.Logs)
-    ##$MoveAnalysis.FailureSummary          = New-FailureSummary -RequestStats $($MigrationLogs.Logs)
+    $MoveAnalysis.FailureSummary          = New-FailureSummary -RequestStats $($MigrationLogs.Logs)
+<#    
     ##$MoveAnalysis.FailureStatistics       = New-FailureStatistics -FailureSummaries $MoveAnalysis.FailureSummary
     ##$MoveAnalysis.LargeItemSummary        = New-LargeItemSummary -RequestStats $($MigrationLogs.Logs)
     ##$MoveAnalysis.BadItemSummary          = New-BadItemSummary -RequestStats $($MigrationLogs.Logs)
@@ -597,46 +597,47 @@ Function New-BasicInformation
     # Build all properties to be added to the oubject
     New-Object PSObject -Property ([ordered]@{
         Alias                           = ([String]$RequestStats.Alias)
-        ExchangeGuid                    = ([String]$RequestStats.ExchangeGuid)
-        WhenCreated                     = $RequestStats.QueuedTimeStamp
-        WhenCompleted                   = $RequestStats.CompletionTimeStamp
-        WhenFailed                      = $RequestStats.FailureTimeStamp
-        Direction                       = ([String]$RequestStats.Direction)
-        Status                          = ([String]$RequestStats.Status)
-        StatusDetail                    = ([String]$RequestStats.StatusDetail)
-        Workload                        = ([String]$RequestStats.Workloadtype)
-        Flags                           = ([String]$RequestStats.Flags)
-        SourceServer                    = ([String]$RequestStats.SourceServer)
-        SourceVersion                   = ([String]$RequestStats.SourceVersion)
-        SourceDatabase                  = ([String]$RequestStats.SourceDatabase)
-        TargetServer                    = ([String]$RequestStats.TargetServer)
-        TargetVersion                   = ([String]$RequestStats.TargetVersion)
-        TargetDatabase                  = ([String]$RequestStats.TargetDatabase)
-        SourceArchiveServer             = ([String]$RequestStats.SourceArchiveServer)
-        SourceArchiveVersion            = ([String]$RequestStats.SourceArchiveVersion)
-        SourceArchiveDatabase           = ([String]$RequestStats.SourceArchiveDatabase)
-        TargetArchiveServer             = ([String]$RequestStats.TargetArchiveServer)
-        TargetArchiveVersion            = ([String]$RequestStats.TargetArchiveVersion)
-        TargetArchiveDatabase           = ([String]$RequestStats.TargetArchiveDatabase)
-        RemoteHostName                  = ([String]$RequestStats.RemoteHostName)
-        RemoteDatabase                  = ([String]$RequestStats.RemoteDatabaseName)
-        Protected                       = ([String]$RequestStats.Protect)
-        TotalPrimarySize                = ([String]$RequestStats.TotalPrimarySize)
-        TotalArchiveSize                = ([String]$RequestStats.TotalArchiveSize)
-        TotalMailboxSize                = ([String]$RequestStats.TotalMailboxSize)
-        TotalPrimaryItemCount           = ([UInt64][String]$RequestStats.TotalPrimaryItemCount)
-        TotalArchiveItemCount           = ([UInt64][String]$RequestStats.TotalArchiveItemCount)
-        TotalMailboxItemCount           = ([UInt64][String]$RequestStats.TotalMailboxItemCount)
         BadItemLimit                    = ([int][String]$RequestStats.BadItemLimit)
         BadItemsEncountered             = ([int][String]$RequestStats.BadItemsEncountered)
+        Direction                       = ([String]$RequestStats.Direction)
+        ExchangeGuid                    = ([String]$RequestStats.ExchangeGuid)
+        Flags                           = ([String]$RequestStats.Flags)
         LargeItemLimit                  = ([int][String]$RequestStats.LargeItemLimit)
         LargeItemsEncountered           = ([int][String]$RequestStats.LargeItemsEncountered)
         OverallDuration                 = ([String]$RequestStats.OverallDuration)
-        TotalInProgressDuration         = ([String]$RequestStats.TotalInProgressDuration)
-        TotalSuspendedDuration          = ([String]$RequestStats.TotalSuspendedDuration)
+        PercentComplete                 = $RequestStats.PercentComplete
+        Protected                       = ([String]$RequestStats.Protect)
+        RemoteHostName                  = ([String]$RequestStats.RemoteHostName)
+        RemoteDatabase                  = ([String]$RequestStats.RemoteDatabaseName)
+        SourceArchiveDatabase           = ([String]$RequestStats.SourceArchiveDatabase)
+        SourceArchiveServer             = ([String]$RequestStats.SourceArchiveServer)
+        SourceArchiveVersion            = ([String]$RequestStats.SourceArchiveVersion)
+        SourceDatabase                  = ([String]$RequestStats.SourceDatabase)
+        SourceServer                    = ([String]$RequestStats.SourceServer)
+        SourceVersion                   = ([String]$RequestStats.SourceVersion)
+        Status                          = ([String]$RequestStats.Status)
+        StatusDetail                    = ([String]$RequestStats.StatusDetail)
+        TargetArchiveDatabase           = ([String]$RequestStats.TargetArchiveDatabase)
+        TargetArchiveServer             = ([String]$RequestStats.TargetArchiveServer)
+        TargetArchiveVersion            = ([String]$RequestStats.TargetArchiveVersion)
+        TargetDatabase                  = ([String]$RequestStats.TargetDatabase)
+        TargetServer                    = ([String]$RequestStats.TargetServer)
+        TargetVersion                   = ([String]$RequestStats.TargetVersion)
+        TotalArchiveItemCount           = ([UInt64][String]$RequestStats.TotalArchiveItemCount)
+        TotalArchiveSize                = ([String]$RequestStats.TotalArchiveSize)
         TotalFailedDuration             = ([String]$RequestStats.TotalFailedDuration)
+        TotalInProgressDuration         = ([String]$RequestStats.TotalInProgressDuration)
+        TotalMailboxItemCount           = ([UInt64][String]$RequestStats.TotalMailboxItemCount)
+        TotalMailboxSize                = ([String]$RequestStats.TotalMailboxSize)
         TotalQueuedDuration             = ([String]$RequestStats.TotalQueuedDuration)
+        TotalSuspendedDuration          = ([String]$RequestStats.TotalSuspendedDuration)
         TotalTransientFailureDuration   = ([String]$RequestStats.TotalTransientFailureDuration)
+        TotalPrimaryItemCount           = ([UInt64][String]$RequestStats.TotalPrimaryItemCount)
+        TotalPrimarySize                = ([String]$RequestStats.TotalPrimarySize)
+        WhenCreated                     = $RequestStats.QueuedTimeStamp
+        WhenCompleted                   = $RequestStats.CompletionTimeStamp
+        WhenFailed                      = $RequestStats.FailureTimeStamp
+        Workload                        = ([String]$RequestStats.Workloadtype)
     })
 }
 
@@ -650,22 +651,55 @@ Function New-PerformanceStatistics
     )
 
     New-Object PSObject -Property ([ordered]@{
-        MigrationDuration         = $RequestStats.TotalInProgressDuration
-        ##TotalGBTransferred        = (Get-Bytes $RequestStats.BytesTransferred) / 1GB
-        PercentComplete           = $RequestStats.PercentComplete
-        ##DataTransferRateMBPerHour = Eval-Safe { (((Get-Bytes $RequestStats.BytesTransferred) / 1MB) / (DurationtoSeconds $RequestStats.TotalInProgressDuration)) * 3600 }
-        ##DataTransferRateGBPerHour = Eval-Safe { (((Get-Bytes $RequestStats.BytesTransferred) / 1GB) / (DurationtoSeconds $RequestStats.TotalInProgressDuration)) * 3600 }
         AverageSourceLatency      = Eval-Safe { $RequestStats.report.sessionstatistics.sourcelatencyinfo.average }
         AverageDestinationLatency = Eval-Safe { $RequestStats.report.sessionstatistics.destinationlatencyinfo.average }
-        SourceSideDuration        = Eval-Safe { $RequestStats.Report.SessionStatistics.SourceProviderInfo.TotalDuration }
+
+        DataTransferRateMBPerHour = Eval-Safe { (((Get-Bytes $RequestStats.BytesTransferred) / 1MB) / (DurationtoSeconds $RequestStats.TotalInProgressDuration)) * 3600 }
+        DataTransferRateGBPerHour = Eval-Safe { (((Get-Bytes $RequestStats.BytesTransferred) / 1GB) / (DurationtoSeconds $RequestStats.TotalInProgressDuration)) * 3600 }
         DestinationSideDuration   = Eval-Safe { $RequestStats.Report.SessionStatistics.DestinationProviderInfo.TotalDuration }
+        MigrationDuration         = $RequestStats.TotalInProgressDuration
         PercentDurationIdle       = Eval-Safe { ((DurationToSeconds $RequestStats.TotalIdleDuration) / (DurationtoSeconds $RequestStats.OverallDuration)) * 100 } -DefaultValue 0
         PercentDurationSuspended  = Eval-Safe { ((DurationToSeconds $RequestStats.TotalSuspendedDuration) / (DurationtoSeconds $RequestStats.OverallDuration)) * 100 } -DefaultValue 0
         PercentDurationFailed     = Eval-Safe { ((DurationToSeconds $RequestStats.TotalFailedDuration) / (DurationtoSeconds $RequestStats.OverallDuration)) * 100 } -DefaultValue 0
         PercentDurationQueued     = Eval-Safe { ((DurationToSeconds $RequestStats.TotalQueuedDuration) / (DurationtoSeconds $RequestStats.OverallDuration)) * 100 } -DefaultValue 0
         PercentDurationLocked     = Eval-Safe { ((DurationToSeconds $RequestStats.TotalStalledDueToMailboxLockedDuration) / (DurationtoSeconds $RequestStats.OverallDuration)) * 100 } -DefaultValue 0
         PercentDurationTransient  = Eval-Safe { ((DurationToSeconds $RequestStats.TotalTransientFailureDuration) / (DurationtoSeconds $RequestStats.OverallDuration)) * 100 } -DefaultValue 0
+        SourceSideDuration        = Eval-Safe { $RequestStats.Report.SessionStatistics.SourceProviderInfo.TotalDuration }
+        TotalGBTransferred        = (Get-Bytes $RequestStats.BytesTransferred) / 1GB
+
     })
+}
+
+
+# Gets the number of bytes in a ByteQuantifiedSize
+Function Get-Bytes
+{
+    param ($datasize)
+
+    try
+    {
+        $datasize.tobytes()
+    }
+    catch [Exception]
+    {
+        Parse-ByteQuantifiedSize $datasize
+    }
+}
+
+# Parses a serialized ByteQuantifiedSize
+Function Parse-ByteQuantifiedSize
+{
+    param ([Parameter(Mandatory = $true)][string]$SerializedSize)
+
+    $result =  [regex]::Match($SerializedSize, '[^\(]+\((([0-9]+),?)+ bytes\)', [Text.RegularExpressions.RegexOptions]::Compiled)
+    if ($result.Success)
+    {
+        [string]$extractedSize = ""
+        $result.Groups[2].Captures | %{ $extractedSize += $_.Value }
+        return [long]$extractedSize
+    }
+
+    return [long]0
 }
 
 
@@ -705,6 +739,50 @@ Function DurationtoSeconds
 
     if ($time -eq $null) { 0 }
     else { $time.TotalSeconds }
+}
+
+
+# Creates an object with just the failure message and timestamp
+Function New-FailureSummary
+{
+    Param(
+        [Parameter(Mandatory = $true)]
+        $RequestStats
+    )
+
+    # Create the object
+    $compactFailures = @()
+
+    # If we have no failures make sure we write something
+    if ($RequestStats.report.failures -eq $null)
+    {
+        $compactFailures += New-Object PSObject -Property @{
+            TimeStamp = [DateTime]::MinValue
+            FailureType = "No Failures Found"
+        }
+    }
+    # Pull out just what we want in the compact report
+    else
+    {
+        $compactFailures += $RequestStats.report.failures | Select-object -Property TimeStamp, Failuretype, @{n='Message'; e={($($_.Message) -Split "`n")[0]}}
+<#
+        # Pull in the entries that indicate us starting a mailbox move
+        $compactFailures += ($RequestStats.report.entries | where { $_.message -like "*examining the request*" } | 
+        select-Object @{
+            Name = "TimeStamp"; 
+            Expression = { $_.CreationTime }
+        },
+        @{
+            Name = "FailureType";
+            Expression = { "-->MRSPickingUpMove" }
+        },
+        Message)
+#>
+    }
+    
+    $compactFailures = $compactFailures | sort-Object -Property timestamp
+
+    Return $compactFailures
 }
 
 
@@ -838,6 +916,24 @@ try {
             Write-Log ("Performance Statistics: `n$($Entry.PerformanceStatistics)") -NonInteractive $true
             Write-Host
         }
+
+        if ($($Entry.FailureSummary)) {
+            Write-Host "Failure Summary: " -ForegroundColor Cyan
+            $($Entry.FailureSummary)
+            Write-Log ("Failure Summary: `n$($Entry.FailureSummary)") -NonInteractive $true
+            Write-Host
+        }
+
+<# Just testing...
+    $MoveRequestStatistics = Import-Clixml C:\1.xml
+
+    $MoveRequestStatistics.Report.Entries | ft -AutoSize CreationTime, ServerName, Type, Flags, Message
+    $ConfigObjectSourceBefore = ($MoveRequestStatistics.Report.Entries | where {($_.Flags -like "*Before*") -and ($_.Flags -like "*Source*")}).ConfigObject
+
+    $ConfigObjectSourceBefore.Props | select PropertyName, @{n='Values'; e={(($($_.Values) -replace "{","") -replace "}","")}}
+
+    $MoveRequestStatistics.Report.Entries | fl CreationTime, ServerName, Type, Flags, Message, Failure, BadItem, MailboxSize, SessionStatistics, ArchiveSessionStatistics, MailboxVerificationResults, DebugData, Connectivity, SourceThrottleDurations, TargetThrottleDurations
+#>
 
         if ($($Entry.Timeline.timelineMinute)) {
             Write-Host "Details about timeline, by minute: " -ForegroundColor Cyan
