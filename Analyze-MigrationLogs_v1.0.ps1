@@ -30,15 +30,19 @@
 # Common space for script's parameters #
 ########################################
 #region Parameters
+
 Param(
     [Parameter(Position=0, ParameterSetName = "FilePath", Mandatory = $false)]
     [String]$FilePath = $null
 )
 
-################################################
-# Common space for functions, global variables #
-################################################
-#region Functions, Global variables
+#endregion Parameters
+
+
+#####################################
+# Common space for global variables #
+#####################################
+#region Global variables
 
 ### ValidationForWorkingDirectory (Scope: Script) variable is used to validate if the Working Directory was created, or not
 [bool]$script:ValidationForWorkingDirectory = $true
@@ -51,6 +55,13 @@ $script:TheWorkingDirectory = $null
 ### ParsedLogs (Scope: Script) variable will contain parsed mailbox migration logs for all affected users
 [System.Collections.ArrayList]$script:ParsedLogs = @()
 
+#endregion Global variables
+
+
+##############################
+# Common space for functions #
+##############################
+#region Functions
 
 ### <summary>
 ### Show-Header function is adding a header on the screen at the time the script starts
@@ -320,8 +331,7 @@ function Selected-FileOption {
     [CmdletBinding()]
     Param
     (        
-        [string]
-        $FilePath
+        [string]$FilePath
     )
 
     [int]$TheNumberOfChecks = 1
@@ -335,7 +345,7 @@ function Selected-FileOption {
         }
         catch {
             ### In case of error, the script will ask to provide again the full path of the .xml file
-            [string]$PathOfXMLFile = Ask-ForXMLPath -NumberOfChecks $NumberOfChecks
+            [string]$PathOfXMLFile = Ask-ForXMLPath -NumberOfChecks $TheNumberOfChecks
         }
     }
     ### If no FilePath was provided, the script will ask to provide the full path of the .xml file
@@ -413,8 +423,7 @@ function Ask-ForXMLPath {
     Param
     (
         [Parameter(Mandatory=$true)]
-        [int]
-        $NumberOfChecks
+        [int]$NumberOfChecks
     )
 
     [string]$PathOfXMLFile = ""
@@ -489,8 +498,7 @@ function Collect-MigrationLogs {
     Param (
         [parameter(Mandatory=$true,
         ParameterSetName="XMLFile")]
-        [string]
-        $XMLFile
+        [string]$XMLFile
     )
     
     if ($XMLFile) {
@@ -507,7 +515,6 @@ function Collect-MigrationLogs {
 
             $null = $script:LogsToAnalyze.Add($LogEntry)
         }
-        
     }
 
     if ($script:LogsToAnalyze) {
@@ -542,11 +549,9 @@ function Create-MoveObject {
 
     # Create the Result object that will be used to store all results
     $MoveAnalysis = New-Object PSObject
-    $OrderedFields | foreach { $MoveAnalysis | Add-Member -Name $_ -Value $null -MemberType NoteProperty  }
-
+    $OrderedFields | foreach {$MoveAnalysis | Add-Member -Name $_ -Value $null -MemberType NoteProperty}
     
-    # Pull everything that we need that is common to all status types
-
+    # Pull everything that we need, that is common to all status types
     $MoveAnalysis.BasicInformation        = New-BasicInformation -RequestStats $($MigrationLogs.Logs)
     $MoveAnalysis.PerformanceStatistics   = New-PerformanceStatistics -RequestStats $($MigrationLogs.Logs)
     $MoveAnalysis.FailureSummary          = New-FailureSummary -RequestStats $($MigrationLogs.Logs)
@@ -571,16 +576,15 @@ function Create-MoveObject {
     $Timeline | Add-Member -NotePropertyName timelineMinute -NotePropertyValue $timelineMinute
 
     $MoveAnalysis | Add-Member -NotePropertyName Timeline -NotePropertyValue $Timeline
-
+#>
     $DetailsAboutTheMove = New-Object PSObject
     $DetailsAboutTheMove | Add-Member -NotePropertyName Environment -NotePropertyValue $TheEnvironment
     $DetailsAboutTheMove | Add-Member -NotePropertyName LogFrom -NotePropertyValue $LogFrom
     $DetailsAboutTheMove | Add-Member -NotePropertyName LogType -NotePropertyValue $LogType
     $DetailsAboutTheMove | Add-Member -NotePropertyName MigrationType -NotePropertyValue $MigrationType
-    $DetailsAboutTheMove | Add-Member -NotePropertyName PrimarySMTPAddress -NotePropertyValue $($MigrationLogs.PrimarySMTPAddress)
+    $DetailsAboutTheMove | Add-Member -NotePropertyName PrimarySMTPAddress -NotePropertyValue $($MigrationLogs.Name)
 
     $MoveAnalysis | Add-Member -NotePropertyName DetailsAboutTheMove -NotePropertyValue $DetailsAboutTheMove
-#>
     return $MoveAnalysis
 
 }
@@ -605,7 +609,7 @@ Function New-BasicInformation
         LargeItemLimit                  = ([int][String]$RequestStats.LargeItemLimit)
         LargeItemsEncountered           = ([int][String]$RequestStats.LargeItemsEncountered)
         OverallDuration                 = ([String]$RequestStats.OverallDuration)
-        PercentComplete                 = $RequestStats.PercentComplete
+        PercentComplete                 = ([int][string]$RequestStats.PercentComplete)
         Protected                       = ([String]$RequestStats.Protect)
         RemoteHostName                  = ([String]$RequestStats.RemoteHostName)
         RemoteDatabase                  = ([String]$RequestStats.RemoteDatabaseName)
@@ -750,6 +754,29 @@ Function New-FailureSummary
         $RequestStats
     )
 
+    # Build all properties to be added to the oubject
+    if (([int]$RequestStats.Report.Failures.Count) -gt 0) {
+        New-Object PSObject -Property ([ordered]@{
+            FailuresCount           = ([int][string]$RequestStats.Report.Failures.Count)
+            LatestTimeStamp         = $RequestStats.Report.Failures[-1].TimeStamp
+            LatestFailureType       = ([string]$RequestStats.Report.Failures[-1].FailureType)
+            LatestMessage           = (([string]$RequestStats.Report.Failures[-1].Message -split "`n")[0])
+        })
+    }
+    else {
+        New-Object PSObject -Property ([ordered]@{
+            FailuresCount           = ([int][string]$RequestStats.Report.Failures.Count)
+        })
+    }
+}
+
+Function Old_New-FailureSummary
+{
+    Param(
+        [Parameter(Mandatory = $true)]
+        $RequestStats
+    )
+
     # Create the object
     $compactFailures = @()
 
@@ -783,6 +810,16 @@ Function New-FailureSummary
     $compactFailures = $compactFailures | sort-Object -Property timestamp
 
     Return $compactFailures
+}
+
+
+function Get-RelevantFailures {
+    param (
+        $MigrationLogs
+    )
+    
+    $LastPercentComplete = $MigrationLogs.Report.Entries | where {$_.Message -like "*Percent complete*"} | select -Last 1
+    $RelevantFailures = $MigrationLogs.Report.Entries | where {($_.CreationTime -ge $LastPercentComplete.CreationTime) -and ($_.Type -eq "Error")}
 }
 
 
@@ -864,7 +901,7 @@ function Build-TimeTrackerTable
 
 
 
-#endregion Functions, Global variables
+#endregion Functions
 
 
 
@@ -908,11 +945,12 @@ try {
             $($Entry.BasicInformation)
             Write-Log ("Basic Information: `n$($Entry.BasicInformation)") -NonInteractive $true
             Write-Host
+            $($Entry.BasicInformation) | ConvertTo-Html -As List | Out-File $script:TheWorkingDirectory\BasicInformation.html
         }
 
         if ($($Entry.PerformanceStatistics)) {
             Write-Host "Performance Statistics: " -ForegroundColor Cyan
-            $($Entry.PerformanceStatistics)
+            ($Entry.PerformanceStatistics)
             Write-Log ("Performance Statistics: `n$($Entry.PerformanceStatistics)") -NonInteractive $true
             Write-Host
         }
@@ -925,7 +963,111 @@ try {
         }
 
 <# Just testing...
+$RequestStats = Import-Clixml C:\1.xml
+$FailuresCount1 = ([int][string]$RequestStats.Report.Failures.Count)
+$FailuresCount1.GetType()
+$FailuresCount1
+
+$FailuresLatestTimeStamp         = ($RequestStats.Report.Failures[-1].TimeStamp)
+$FailuresLatestTimeStamp.GetType()
+
+$FailuresLatestFailureType       = ([string]$RequestStats.Report.Failures[-1].FailureType)
+$FailuresLatestFailureType.GetType()
+
+$FailuresLatestMessage           = (([string]$RequestStats.Report.Failures[-1].Message -split "`n")[0])
+$FailuresLatestMessage.GetType()
+
+$PercentComplete                 = $RequestStats.PercentComplete
+$PercentComplete.GetType()
+
+
+Function New-FailureSummary
+{
+    Param(
+        [Parameter(Mandatory = $true)]
+        $RequestStats
+    )
+
+    # Build all properties to be added to the oubject
+    New-Object PSObject -Property ([ordered]@{
+        FailuresCount                   = ([int][string]$RequestStats.Report.Failures.Count)
+        FailuresLatestTimeStamp         = $RequestStats.Report.Failures[-1].TimeStamp
+        FailuresLatestFailureType       = ([string]$RequestStats.Report.Failures[-1].FailureType)
+        FailuresLatestMessage           = (([string]$RequestStats.Report.Failures[-1].Message -split "`n")[0])
+    })
+}
+
+### <summary>
+### Write-Log function will add the entries in the LogFile, saved on the Working Directory. Also, it may display a log entry on the screen.
+### </summary>
+### <param name="string">string parameter is used to get the string that will be listed in the log file, and/or on the screen.</param>
+### <param name="NonInteractive">if NonInteractive parameter is set to True, the information will be saved just on the LogFile. Else, it will be displayed
+### on the screen, too.</param>
+Function Write-Log {
+    [CmdletBinding()]
+    Param (
+        [parameter(Position=0)]
+        [string]
+        $string,
+        [parameter(Position=1)]
+        [bool]
+        $NonInteractive,
+        [parameter(Position=2)]
+        [ConsoleColor]
+        $ForegroundColor = "White"
+    )
+
+    ### Collecting the current date
+    [string]$date = Get-Date -Format G
+        
+    ### Write everything to LogFile
+
+    if ($script:LogFile) {
+        ( "[" + $date + "] || " + $string) | Out-File -FilePath $script:LogFile -Append
+    }
+    
+    ### In case NonInteractive is not True, write on display, too
+    if (!($NonInteractive)){
+        Write-Host
+        ("[" + $date + "] || " + $string) | Write-Host -ForegroundColor $ForegroundColor
+    }
+}
+
+
+[Array]$OrderedFields = "BasicInformation","PerformanceStatistics","FailureSummary","FailureStatistics","LargeItemSummary","BadItemSummary","MailboxVerification"
+
+$MoveAnalysis = New-Object PSObject
+$OrderedFields | foreach { $MoveAnalysis | Add-Member -Name $_ -Value $null -MemberType NoteProperty  }
+$MoveAnalysis.FailureSummary          = New-FailureSummary -RequestStats $RequestStats
+
+$Entry = $MoveAnalysis[0]
+$Entry.FailquestStatistureSummary
+
+        if ($($Entry.FailureSummary)) {
+            Write-Host "Failure Summary: " -ForegroundColor Cyan
+            $($Entry.FailureSummary) | fl
+            Write-Log ("Failure Summary: `n$($Entry.FailureSummary)") -NonInteractive $true
+            Write-Host
+        }
+
+$Entry.FailureSummary | Get-Member -MemberType NoteProperty
+foreach ($NewEntry in ($($Entry.FailureSummary) | Get-Member -MemberType NoteProperty).Name) {
+    Write-Host $NewEntry":`t" -NoNewline
+    $($Entry.FailureSummary.$NewEntry)
+}
+
+
+
+[Array]$TheObject = (((Get-Content .\Log.log) -split "`{")[2] -split "; ")
+
+$TheObject.GetType()
+
+
+
+
+
     $MoveRequestStatistics = Import-Clixml C:\1.xml
+    $MoveRequestStatistics = $RequestStats
 
     $MoveRequestStatistics.Report.Entries | ft -AutoSize CreationTime, ServerName, Type, Flags, Message
     $ConfigObjectSourceBefore = ($MoveRequestStatistics.Report.Entries | where {($_.Flags -like "*Before*") -and ($_.Flags -like "*Source*")}).ConfigObject
@@ -933,6 +1075,21 @@ try {
     $ConfigObjectSourceBefore.Props | select PropertyName, @{n='Values'; e={(($($_.Values) -replace "{","") -replace "}","")}}
 
     $MoveRequestStatistics.Report.Entries | fl CreationTime, ServerName, Type, Flags, Message, Failure, BadItem, MailboxSize, SessionStatistics, ArchiveSessionStatistics, MailboxVerificationResults, DebugData, Connectivity, SourceThrottleDurations, TargetThrottleDurations
+
+    $MoveRequestStatistics.Report.Entries | select -Last 11 -Skip 10 | fl
+$SessionStatistics = $MoveRequestStatistics.Report.Entries | where {$_.Flags -like "*SessionStatistics*"}
+$SessionStatistics.Count
+$SessionStatistics | fl LocalizedString
+$SessionStatistics[-6]
+
+
+$LastPercentComplete = $RequestStats.Report.Entries | where {$_.Message -like "*Percent complete*"} | select -Last 1
+$LastPercentComplete
+
+$MigrationLogs = $RequestStats
+$LastPercentComplete = $MigrationLogs.Report.Entries | where {$_.Message -like "*Percent complete*"} | select -Last 1
+    $RelevantFailures = $MigrationLogs.Report.Entries | where {($_.CreationTime -ge $LastPercentComplete.CreationTime) -and ($_.Type -eq "Error")}
+    $RelevantFailures.count
 #>
 
         if ($($Entry.Timeline.timelineMinute)) {
@@ -972,6 +1129,16 @@ try {
         }
 
         Write-Host
+    }
+
+    if ($script:TheWorkingDirectory) {
+        Write-Host
+        Write-Host "Useful logs can be found on the following directory:" -ForegroundColor Green
+        Write-Host "`tFull path: " -ForegroundColor Cyan -NoNewline
+        Write-Host "`t$script:TheWorkingDirectory" -ForegroundColor White
+        Write-Host "`tShort path:" -ForegroundColor Cyan -NoNewline
+        $TheShortPath = ($script:TheWorkingDirectory -split "MigrationAnalyzer")[1]
+        Write-Host "`t`%temp`%\MigrationAnalyzer$TheShortPath" -ForegroundColor White
     }
 
     #endregion ForTestPurposes - This will be removed
